@@ -1,0 +1,189 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 220 20% 96%;
+    --foreground: 240 20% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 20% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 20% 10%;
+
+    --primary: 218 60% 10%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 240 20% 10%;
+
+    --muted: 220 14% 96%;
+    --muted-foreground: 215 16% 49%;
+
+    --accent: 43 55% 54%;
+    --accent-foreground: 218 60% 10%;
+
+    --success: 155 55% 33%;
+    --success-foreground: 0 0% 100%;
+
+    --info: 217 91% 60%;
+    --info-foreground: 0 0% 100%;
+
+    --destructive: 355 78% 56%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 20% 91%;
+    --input: 220 18% 88%;
+    --ring: 43 55% 54%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 218 60% 10%;
+    --sidebar-foreground: 220 20% 80%;
+    --sidebar-primary: 43 55% 54%;
+    --sidebar-primary-foreground: 218 60% 10%;
+    --sidebar-accent: 218 50% 16%;
+    --sidebar-accent-foreground: 0 0% 95%;
+    --sidebar-border: 218 40% 18%;
+    --sidebar-ring: 43 55% 54%;
+
+    --chart-1: 218 60% 10%;
+    --chart-2: 155 55% 33%;
+    --chart-3: 43 55% 54%;
+    --chart-4: 217 91% 60%;
+    --chart-5: 355 78% 56%;
+  }
+
+  /* Dark theme — preserves NPF navy/gold identity while lifting surfaces.
+     All app colors are token-driven so charts, badges, and shadcn primitives
+     adapt automatically. */
+  .dark {
+    --background: 220 25% 7%;
+    --foreground: 220 15% 92%;
+
+    --card: 220 22% 11%;
+    --card-foreground: 220 15% 92%;
+
+    --popover: 220 22% 11%;
+    --popover-foreground: 220 15% 92%;
+
+    --primary: 43 55% 60%;
+    --primary-foreground: 220 25% 8%;
+
+    --secondary: 220 18% 16%;
+    --secondary-foreground: 220 15% 92%;
+
+    --muted: 220 18% 14%;
+    --muted-foreground: 220 12% 65%;
+
+    --accent: 43 55% 60%;
+    --accent-foreground: 220 25% 8%;
+
+    --success: 155 50% 50%;
+    --success-foreground: 220 25% 8%;
+
+    --info: 217 91% 65%;
+    --info-foreground: 220 25% 8%;
+
+    --destructive: 355 78% 62%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 18% 20%;
+    --input: 220 18% 22%;
+    --ring: 43 55% 60%;
+
+    --sidebar-background: 220 30% 5%;
+    --sidebar-foreground: 220 15% 80%;
+    --sidebar-primary: 43 55% 60%;
+    --sidebar-primary-foreground: 220 30% 5%;
+    --sidebar-accent: 220 25% 12%;
+    --sidebar-accent-foreground: 0 0% 95%;
+    --sidebar-border: 220 25% 14%;
+    --sidebar-ring: 43 55% 60%;
+
+    --chart-1: 43 55% 60%;
+    --chart-2: 155 50% 50%;
+    --chart-3: 217 91% 65%;
+    --chart-4: 280 65% 65%;
+    --chart-5: 355 78% 62%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13.5px;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Source Serif 4', serif;
+  }
+}
+
+@layer utilities {
+  /* Audit-trail deep-link focus highlight: pulses an inset gold ring + tinted
+     background, then fades out. Works on <tr>, <li>, <div>, etc. */
+  .audit-focus-highlight {
+    animation: audit-focus-pulse 4.5s ease-out;
+    box-shadow: inset 0 0 0 2px hsl(var(--accent));
+    background-color: hsl(var(--accent) / 0.12) !important;
+    scroll-margin-top: 96px;
+  }
+  @keyframes audit-focus-pulse {
+    0%   { box-shadow: inset 0 0 0 0px hsl(var(--accent) / 0); background-color: hsl(var(--accent) / 0.35); }
+    15%  { box-shadow: inset 0 0 0 3px hsl(var(--accent)); background-color: hsl(var(--accent) / 0.30); }
+    100% { box-shadow: inset 0 0 0 2px hsl(var(--accent) / 0.4); background-color: hsl(var(--accent) / 0.08); }
+  }
+}
+
+/* ---------------- Print stylesheet -----------------
+   Cleans up the screen chrome for printed reports and ensures wide tables
+   paginate sensibly. Targets every page — components opt out with `print:hidden`. */
+@media print {
+  @page { size: A4; margin: 14mm 12mm 16mm 12mm; }
+
+  html, body { background: #fff !important; color: #000 !important; }
+  body { font-size: 11px; }
+
+  /* Hide app chrome */
+  .app-shell > [data-sidebar="sidebar"],
+  aside[data-sidebar="sidebar"],
+  header.sticky,
+  [data-radix-popper-content-wrapper],
+  .print\:hidden { display: none !important; }
+
+  /* Let the main column take the whole page */
+  .app-shell { display: block !important; }
+  .print-main { overflow: visible !important; padding: 0 !important; }
+
+  /* Cards become flat blocks */
+  .rounded-xl, .rounded-lg, .rounded-md {
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    border: 1px solid #999 !important;
+    background: #fff !important;
+  }
+
+  /* Table pagination — repeat header rows + avoid mid-row breaks */
+  table { border-collapse: collapse !important; width: 100% !important; page-break-inside: auto; }
+  thead { display: table-header-group; }
+  tfoot { display: table-footer-group; }
+  tr { page-break-inside: avoid; page-break-after: auto; }
+  th, td { border: 1px solid #999 !important; padding: 4px 6px !important; }
+
+  /* Common interactive bits we don't want on paper */
+  button, .sr-only, .recharts-tooltip-wrapper { display: none !important; }
+
+  /* Page break helpers */
+  .print-break-before { page-break-before: always; }
+  .print-break-avoid  { page-break-inside: avoid; }
+
+  /* Keep links readable */
+  a { color: #000 !important; text-decoration: none !important; }
+  a[href]::after { content: ""; }
+}
