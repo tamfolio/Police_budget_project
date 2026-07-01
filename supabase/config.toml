@@ -1,0 +1,4 @@
+project_id = "onrcauguxnhnaajgpalr"
+
+[functions.pab-proxy]
+verify_jwt = false
