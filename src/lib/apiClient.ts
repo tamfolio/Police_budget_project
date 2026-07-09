@@ -44,7 +44,7 @@ async function refreshAccessToken(): Promise<string | null> {
 
   refreshInFlight = (async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/auth/refresh-token`, {
+      const res = await fetch(`${API_BASE_URL}/auth/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({ refreshToken }),

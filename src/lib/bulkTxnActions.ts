@@ -1,36 +1,39 @@
-import { supabase } from "@/integrations/supabase/client";
+import { reviewAie, approveAie, rejectAie } from "@/lib/aiesApi";
+import { reviewFundInflow, approveFundInflow, rejectFundInflow } from "@/lib/fundInflowsApi";
+import { reviewExpenditure, approveExpenditure, returnExpenditure } from "@/lib/expendituresApi";
 
 export type BulkAction = "REVIEW" | "APPROVE" | "RETURN";
+export type BulkTable = "aie_records" | "fund_inflows" | "distribution_batches" | "expenditures";
 
-/**
- * Apply the same transition to every selected record in `table`, recording
- * an approval_actions entry per row. Each row is attempted independently so
- * a single RLS rejection does not abort the rest.
- */
 export async function runBulkTxnAction(opts: {
-  table: "aie_records" | "fund_inflows" | "distribution_batches" | "expenditures";
+  table: BulkTable;
   ids: string[];
   action: BulkAction;
   actorId: string;
   remarks?: string;
 }): Promise<{ ok: number; failed: number }> {
-  const now = new Date().toISOString();
-  let patch: Record<string, any> = {};
-  if (opts.action === "REVIEW") patch = { status: "OFFICER_REVIEWED", reviewed_by: opts.actorId, reviewed_at: now };
-  else if (opts.action === "APPROVE") patch = { status: "APPROVED", approved_by: opts.actorId, approved_at: now };
-  else patch = { status: "RETURNED", return_remarks: (opts.remarks ?? "").trim() };
+  const { table, ids, action, remarks } = opts;
 
-  const results = await Promise.allSettled(
-    opts.ids.map(async (id) => {
-      const upd = await supabase.from(opts.table).update(patch).eq("id", id);
-      if (upd.error) throw upd.error;
-      const ins = await supabase.from("approval_actions").insert({
-        record_type: opts.table, record_id: id, actor: opts.actorId,
-        action: opts.action, remarks: opts.remarks?.trim() || null,
-      });
-      if (ins.error) throw ins.error;
-    })
-  );
+  const run = (id: string): Promise<unknown> => {
+    if (table === "aie_records") {
+      if (action === "REVIEW")  return reviewAie(id);
+      if (action === "APPROVE") return approveAie(id);
+      return rejectAie(id, remarks ?? "Returned");
+    }
+    if (table === "fund_inflows") {
+      if (action === "REVIEW")  return reviewFundInflow(id);
+      if (action === "APPROVE") return approveFundInflow(id);
+      return rejectFundInflow(id, remarks ?? "Returned");
+    }
+    if (table === "expenditures") {
+      if (action === "REVIEW")  return reviewExpenditure(id);
+      if (action === "APPROVE") return approveExpenditure(id);
+      return returnExpenditure(id, remarks ?? "Returned");
+    }
+    return Promise.reject(new Error(`Bulk actions not supported for ${table}`));
+  };
+
+  const results = await Promise.allSettled(ids.map(run));
   let ok = 0, failed = 0;
   results.forEach(r => r.status === "fulfilled" ? ok++ : failed++);
   return { ok, failed };

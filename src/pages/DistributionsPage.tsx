@@ -5,6 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
@@ -12,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import {
-  Check, Pencil, Plus, RefreshCcw, Send, Trash2, Undo2, History, Database, Loader2,
+  Check, ChevronDown, ChevronRight, Pencil, Plus, RefreshCcw, Send, Trash2, Undo2, History, Database, Loader2,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { BudgetCode } from "@/components/BudgetCode";
@@ -361,63 +362,88 @@ function ZoneViewTable({ period }: { period: DistributionZonePeriod }) {
     { key: "zone7_12", label: "Zones 7–12" },
     { key: "zone13_17", label: "Zones 13–17" },
   ];
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(
+    { zone1_6: true, zone7_12: true, zone13_17: true },
+  );
+  const [openForms, setOpenForms] = useState<Record<string, boolean>>({});
+
   return (
     <div className="space-y-4">
       {groups.map(g => {
         const forms = period.data?.[g.key] ?? [];
+        const gOpen = openGroups[g.key] ?? true;
         return (
-          <Card key={g.key}>
-            <CardHeader className="py-3">
-              <CardTitle className="text-base">
-                {g.label} <span className="text-muted-foreground font-normal text-[12px]">· {forms.length} formation{forms.length === 1 ? "" : "s"}</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 pt-0">
-              {forms.length === 0 && <p className="text-xs text-muted-foreground">No formations.</p>}
-              {forms.map((f, idx) => (
-                <div key={`${f.name}-${idx}`} className="rounded-md border border-border">
-                  <div className="px-3 py-2 bg-muted/50 border-b border-border flex items-baseline justify-between">
-                    <div className="text-[13px] font-semibold uppercase tracking-wide">{f.name}</div>
-                    <div className="text-[11px] text-muted-foreground">Provision: <span className="tabular-nums text-foreground font-semibold">₦{fmtN(f.provision)}</span></div>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-[12px] border-separate border-spacing-0">
-                      <thead>
-                        <tr className="text-left bg-muted/20">
-                          <th className="px-3 py-1.5 w-16">S/No.</th>
-                          <th className="px-3 py-1.5 min-w-[260px]">Item of Expenditure</th>
-                          <th className="px-3 py-1.5 w-28">Code</th>
-                          {period.columns.map((c, ci) => (
-                            <th key={ci} className="px-3 py-1.5 w-36 text-right">{c}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {f.items.map((it, i) => (
-                          <tr key={i} className="border-t border-border">
-                            <td className="px-3 py-1.5 w-16">{it.sno ?? ""}</td>
-                            <td className="px-3 py-1.5 min-w-[260px]">{it.desc}</td>
-                            <td className="px-3 py-1.5 w-28"><BudgetCode code={it.code} /></td>
-                            {period.columns.map((_, ci) => (
-                              <td key={ci} className="px-3 py-1.5 text-right tabular-nums">
-                                {it.amounts?.[ci] == null ? "" : fmtN(it.amounts[ci])}
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                        <tr className="border-t border-border bg-muted/30 font-semibold">
-                          <td className="px-3 py-1.5" colSpan={3}>Total</td>
-                          {(f.totals ?? []).map((t, ci) => (
-                            <td key={ci} className="px-3 py-1.5 text-right tabular-nums">{fmtN(t)}</td>
-                          ))}
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+          <Collapsible key={g.key} open={gOpen} onOpenChange={o => setOpenGroups(s => ({ ...s, [g.key]: o }))}>
+            <Card>
+              <CardHeader className="py-3">
+                <CollapsibleTrigger asChild>
+                  <button type="button" className="flex items-center gap-2 w-full text-left">
+                    {gOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                    <CardTitle className="text-base">{g.label}</CardTitle>
+                    <span className="ml-auto text-[11px] text-muted-foreground">{forms.length} formation{forms.length === 1 ? "" : "s"}</span>
+                  </button>
+                </CollapsibleTrigger>
+              </CardHeader>
+              <CollapsibleContent>
+                <CardContent className="space-y-3 pt-0">
+                  {forms.length === 0 && <p className="text-xs text-muted-foreground">No formations.</p>}
+                  {forms.map((f, idx) => {
+                    const fKey = `${g.key}::${idx}`;
+                    const fOpen = openForms[fKey] ?? true;
+                    return (
+                      <Collapsible key={fKey} open={fOpen} onOpenChange={o => setOpenForms(s => ({ ...s, [fKey]: o }))}>
+                        <div className="rounded-md border border-border">
+                          <CollapsibleTrigger asChild>
+                            <button type="button" className="flex items-center gap-2 w-full text-left px-3 py-2 bg-muted/50 border-b border-border rounded-t-md hover:bg-muted/70 transition-colors">
+                              {fOpen ? <ChevronDown className="h-3.5 w-3.5 shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0" />}
+                              <span className="text-[13px] font-semibold uppercase tracking-wide">{f.name}</span>
+                              <span className="ml-auto text-[11px] text-muted-foreground shrink-0">Provision: <span className="tabular-nums text-foreground font-semibold">₦{fmtN(f.provision)}</span></span>
+                            </button>
+                          </CollapsibleTrigger>
+                          <CollapsibleContent>
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-[12px] border-separate border-spacing-0">
+                                <thead>
+                                  <tr className="text-left bg-muted/20">
+                                    <th className="px-3 py-1.5 w-16">S/No.</th>
+                                    <th className="px-3 py-1.5 min-w-[260px]">Item of Expenditure</th>
+                                    <th className="px-3 py-1.5 w-28">Code</th>
+                                    {period.columns.map((c, ci) => (
+                                      <th key={ci} className="px-3 py-1.5 w-36 text-right">{c}</th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {f.items.map((it, i) => (
+                                    <tr key={i} className="border-t border-border">
+                                      <td className="px-3 py-1.5 w-16">{it.sno ?? ""}</td>
+                                      <td className="px-3 py-1.5 min-w-[260px]">{it.desc}</td>
+                                      <td className="px-3 py-1.5 w-28"><BudgetCode code={it.code} /></td>
+                                      {period.columns.map((_, ci) => (
+                                        <td key={ci} className="px-3 py-1.5 text-right tabular-nums">
+                                          {it.amounts?.[ci] == null ? "" : fmtN(it.amounts[ci])}
+                                        </td>
+                                      ))}
+                                    </tr>
+                                  ))}
+                                  <tr className="border-t border-border bg-muted/30 font-semibold">
+                                    <td className="px-3 py-1.5" colSpan={3}>Total</td>
+                                    {(f.totals ?? []).map((t, ci) => (
+                                      <td key={ci} className="px-3 py-1.5 text-right tabular-nums">{fmtN(t)}</td>
+                                    ))}
+                                  </tr>
+                                </tbody>
+                              </table>
+                            </div>
+                          </CollapsibleContent>
+                        </div>
+                      </Collapsible>
+                    );
+                  })}
+                </CardContent>
+              </CollapsibleContent>
+            </Card>
+          </Collapsible>
         );
       })}
     </div>
@@ -426,61 +452,73 @@ function ZoneViewTable({ period }: { period: DistributionZonePeriod }) {
 
 // ─── Simple view renderer (formations / schools) ──────────────────────────────
 function SimpleViewTable({ period }: { period: DistributionSimplePeriod }) {
+  const [openSections, setOpenSections] = useState<Record<number, boolean>>({});
+
   return (
     <div className="space-y-3">
       {(period.sections ?? []).length === 0 && (
         <Card><CardContent className="py-6 text-center text-sm text-muted-foreground">No sections.</CardContent></Card>
       )}
       {(period.sections ?? []).map((s, si) => {
+        const sOpen = openSections[si] ?? true;
         const colTotals = period.columns.map((_, ci) => s.items.reduce((sum, it) => sum + (Number(it.amounts?.[ci]) || 0), 0));
         return (
-          <div key={`${s.name}-${si}`} className="rounded-md border border-border">
-            <div className="px-3 py-2 bg-muted/50 border-b border-border">
-              <div className="text-[13px] font-semibold uppercase tracking-wide">{s.name}</div>
-              <div className="text-[11px] text-muted-foreground mt-0.5">
-                PROVISION =N=
-                {(s.provisions ?? []).map((p, ci) => (
-                  <span key={ci} className="ml-2 tabular-nums font-semibold text-foreground">
-                    {fmtN(p)}{period.columns.length > 1 ? ` (${period.columns[ci]})` : ""}
-                  </span>
-                ))}
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-[12px] border-separate border-spacing-0">
-                <thead>
-                  <tr className="text-left bg-muted/20">
-                    <th className="px-3 py-1.5 w-16">S/No.</th>
-                    <th className="px-3 py-1.5 min-w-[260px]">Items of Expenditure</th>
-                    <th className="px-3 py-1.5 w-28">Code</th>
-                    {period.columns.map((c, ci) => (
-                      <th key={ci} className="px-3 py-1.5 w-36 text-right">{c}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {s.items.map((it, i) => (
-                    <tr key={i} className="border-t border-border">
-                      <td className="px-3 py-1.5 w-16">{it.sno ?? ""}</td>
-                      <td className="px-3 py-1.5 min-w-[260px]">{it.desc}</td>
-                      <td className="px-3 py-1.5 w-28"><BudgetCode code={it.code} /></td>
-                      {period.columns.map((_, ci) => (
-                        <td key={ci} className="px-3 py-1.5 text-right tabular-nums">
-                          {it.amounts?.[ci] == null ? "" : fmtN(it.amounts[ci])}
-                        </td>
+          <Collapsible key={`${s.name}-${si}`} open={sOpen} onOpenChange={o => setOpenSections(prev => ({ ...prev, [si]: o }))}>
+            <div className="rounded-md border border-border">
+              <CollapsibleTrigger asChild>
+                <button type="button" className="flex items-center gap-2 w-full text-left px-3 py-2 bg-muted/50 border-b border-border rounded-t-md hover:bg-muted/70 transition-colors">
+                  {sOpen ? <ChevronDown className="h-3.5 w-3.5 shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0" />}
+                  <div className="min-w-0">
+                    <div className="text-[13px] font-semibold uppercase tracking-wide">{s.name}</div>
+                    <div className="text-[11px] text-muted-foreground mt-0.5">
+                      PROVISION =N=
+                      {(s.provisions ?? []).map((p, ci) => (
+                        <span key={ci} className="ml-2 tabular-nums font-semibold text-foreground">
+                          {fmtN(p)}{period.columns.length > 1 ? ` (${period.columns[ci]})` : ""}
+                        </span>
                       ))}
-                    </tr>
-                  ))}
-                  <tr className="border-t border-border bg-muted/30 font-semibold">
-                    <td className="px-3 py-1.5" colSpan={3}>Total</td>
-                    {colTotals.map((t, ci) => (
-                      <td key={ci} className="px-3 py-1.5 text-right tabular-nums">{fmtN(t)}</td>
-                    ))}
-                  </tr>
-                </tbody>
-              </table>
+                    </div>
+                  </div>
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[12px] border-separate border-spacing-0">
+                    <thead>
+                      <tr className="text-left bg-muted/20">
+                        <th className="px-3 py-1.5 w-16">S/No.</th>
+                        <th className="px-3 py-1.5 min-w-[260px]">Items of Expenditure</th>
+                        <th className="px-3 py-1.5 w-28">Code</th>
+                        {period.columns.map((c, ci) => (
+                          <th key={ci} className="px-3 py-1.5 w-36 text-right">{c}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {s.items.map((it, i) => (
+                        <tr key={i} className="border-t border-border">
+                          <td className="px-3 py-1.5 w-16">{it.sno ?? ""}</td>
+                          <td className="px-3 py-1.5 min-w-[260px]">{it.desc}</td>
+                          <td className="px-3 py-1.5 w-28"><BudgetCode code={it.code} /></td>
+                          {period.columns.map((_, ci) => (
+                            <td key={ci} className="px-3 py-1.5 text-right tabular-nums">
+                              {it.amounts?.[ci] == null ? "" : fmtN(it.amounts[ci])}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                      <tr className="border-t border-border bg-muted/30 font-semibold">
+                        <td className="px-3 py-1.5" colSpan={3}>Total</td>
+                        {colTotals.map((t, ci) => (
+                          <td key={ci} className="px-3 py-1.5 text-right tabular-nums">{fmtN(t)}</td>
+                        ))}
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </CollapsibleContent>
             </div>
-          </div>
+          </Collapsible>
         );
       })}
     </div>

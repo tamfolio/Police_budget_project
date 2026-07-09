@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
+  AlertCircle,
   Check,
+  CheckCircle2,
+  Download,
   FileSignature,
   Loader2,
   Pencil,
@@ -12,6 +15,7 @@ import {
   Send,
   Trash2,
   Undo2,
+  Upload,
   X,
   XCircle,
 } from "lucide-react";
@@ -56,11 +60,14 @@ import {
   type AieLineItem,
   type AieStatus,
 } from "@/lib/aiesApi";
+import { parseUpload, UPLOAD_ACCEPT } from "@/lib/tableUpload";
+import { getBudgetCodeReference, type BudgetCategory } from "@/lib/budgetCodesApi";
+import * as XLSX from "xlsx";
 
 type Tab = "ALL" | "REVIEW" | "APPROVAL";
 
 interface LineDraft {
-  itemCode: AieItemCode | "";
+  itemCode: string;
   subItemCode: string;
   amount: string;
 }
@@ -109,6 +116,266 @@ function linesTotal(lines: AieLineItem[] | undefined) {
   return (lines ?? []).reduce((s, l) => s + (Number(l.amount) || 0), 0);
 }
 
+// ─── CSV/XLSX columns (one row per line item; rows sharing the same AIE No are merged) ───
+const UPLOAD_HEADERS = [
+  "AIE No",
+  "Fiscal Year",
+  "Issue Date",
+  "Expires On",
+  "Recipient Unit",
+  "Item Code",
+  "Sub-Item Code",
+  "Amount",
+];
+
+const SAMPLE_ROWS = [
+  ["AIE/2026/01/0001", "2026", "2026-01-15", "", "Finance Department", "OFFICE_SUPPLIES", "STATIONERY", "150000"],
+  ["AIE/2026/01/0001", "2026", "2026-01-15", "", "Finance Department", "TRAVEL", "LOCAL_TRANSPORT", "80000"],
+  ["AIE/2026/01/0002", "2026", "2026-01-20", "2026-03-31", "Operations Unit", "UTILITIES", "ELECTRICITY", "200000"],
+];
+
+type UploadedAie = {
+  aieNo: string;
+  fiscalYear: number;
+  issueDate: string;
+  expiresOn?: string;
+  recipientUnit: string;
+  lines: { itemCode: AieItemCode; subItemCode: string; amount: number }[];
+  errors: string[];
+};
+
+type SubmitResult = { aieNo: string; ok: boolean; message: string };
+
+function parseAieUpload(rows: string[][]): UploadedAie[] {
+  if (!rows.length) return [];
+  const header = rows[0].map(h => h.trim().toLowerCase());
+  const idx = (name: string) => header.findIndex(h => h === name.toLowerCase());
+  const iAieNo = idx("aie no");
+  const iFy = idx("fiscal year");
+  const iDate = idx("issue date");
+  const iExp = idx("expires on");
+  const iUnit = idx("recipient unit");
+  const iItem = idx("item code");
+  const iSub = idx("sub-item code");
+  const iAmt = idx("amount");
+
+  const missing = [
+    iAieNo < 0 && "AIE No",
+    iFy < 0 && "Fiscal Year",
+    iDate < 0 && "Issue Date",
+    iUnit < 0 && "Recipient Unit",
+    iItem < 0 && "Item Code",
+    iSub < 0 && "Sub-Item Code",
+    iAmt < 0 && "Amount",
+  ].filter(Boolean);
+  if (missing.length) {
+    return [{ aieNo: "(header error)", fiscalYear: 0, issueDate: "", recipientUnit: "", lines: [], errors: [`Missing columns: ${missing.join(", ")}`] }];
+  }
+
+  const map = new Map<string, UploadedAie>();
+  rows.slice(1).forEach((r, ri) => {
+    const aieNo = (r[iAieNo] ?? "").trim().toUpperCase();
+    if (!aieNo) return;
+    const rowLabel = `Row ${ri + 2}`;
+    const errors: string[] = [];
+
+    if (!map.has(aieNo)) {
+      const fy = Number((r[iFy] ?? "").replace(/\D/g, ""));
+      const issueDate = (r[iDate] ?? "").trim();
+      const expiresOn = iExp >= 0 ? (r[iExp] ?? "").trim() : "";
+      const recipientUnit = (r[iUnit] ?? "").trim();
+
+      if (!Number.isInteger(fy) || fy < 2000 || fy > 2100) errors.push(`${rowLabel}: Fiscal Year "${r[iFy]}" is invalid.`);
+      if (!issueDate) errors.push(`${rowLabel}: Issue Date is required.`);
+      if (!AIE_NO_PATTERN.test(aieNo)) errors.push(`${rowLabel}: AIE No "${aieNo}" must match AIE/YYYY/MM/NNNN.`);
+      if (!recipientUnit) errors.push(`${rowLabel}: Recipient Unit is required.`);
+      if (expiresOn && issueDate && expiresOn <= issueDate) errors.push(`${rowLabel}: Expires On must be after Issue Date.`);
+
+      map.set(aieNo, { aieNo, fiscalYear: fy, issueDate, expiresOn: expiresOn || undefined, recipientUnit, lines: [], errors });
+    }
+
+    const entry = map.get(aieNo)!;
+    const itemCode = (r[iItem] ?? "").trim().toUpperCase();
+    const subItemCode = (r[iSub] ?? "").trim().toUpperCase();
+    const amount = Number((r[iAmt] ?? "").replace(/[^\d.-]/g, ""));
+
+    if (!(AIE_ITEM_CODES as readonly string[]).includes(itemCode)) {
+      entry.errors.push(`${rowLabel}: Item Code "${itemCode}" is not valid. Must be one of: ${AIE_ITEM_CODES.join(", ")}.`);
+    } else if (!subItemCode) {
+      entry.errors.push(`${rowLabel}: Sub-Item Code is required.`);
+    } else if (!Number.isFinite(amount) || amount <= 0) {
+      entry.errors.push(`${rowLabel}: Amount "${r[iAmt]}" must be a positive number.`);
+    } else {
+      entry.lines.push({ itemCode: itemCode as AieItemCode, subItemCode, amount: Math.round(amount * 100) / 100 });
+    }
+  });
+
+  return Array.from(map.values()).map(e => {
+    if (e.errors.length === 0 && e.lines.length === 0) {
+      e.errors.push("No valid line items found for this AIE.");
+    }
+    return e;
+  });
+}
+
+function AieBulkUploadDialog({ open, onClose, onDone }: { open: boolean; onClose: () => void; onDone: () => void }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [parsed, setParsed] = useState<UploadedAie[]>([]);
+  const [results, setResults] = useState<SubmitResult[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [phase, setPhase] = useState<"idle" | "preview" | "done">("idle");
+
+  const reset = () => { setParsed([]); setResults([]); setPhase("idle"); if (fileRef.current) fileRef.current.value = ""; };
+  const handleClose = () => { reset(); onClose(); };
+
+  const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const rows = await parseUpload(file);
+      const aies = parseAieUpload(rows);
+      setParsed(aies);
+      setPhase("preview");
+    } catch (err) {
+      toast.error("Could not read file. Make sure it's a valid CSV or XLSX.");
+    }
+  };
+
+  const downloadTemplate = () => {
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([UPLOAD_HEADERS, ...SAMPLE_ROWS]);
+    XLSX.utils.book_append_sheet(wb, ws, "AIE Template");
+    const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = "aie_upload_template.xlsx";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  };
+
+  const submit = async () => {
+    const valid = parsed.filter(a => a.errors.length === 0);
+    if (!valid.length) return;
+    setSubmitting(true);
+    const out: SubmitResult[] = [];
+    for (const a of valid) {
+      try {
+        await createAie({ fiscalYear: a.fiscalYear, aieNo: a.aieNo, issueDate: a.issueDate, expiresOn: a.expiresOn, recipientUnit: a.recipientUnit, lineItems: a.lines });
+        out.push({ aieNo: a.aieNo, ok: true, message: "Created" });
+      } catch (e) {
+        out.push({ aieNo: a.aieNo, ok: false, message: e instanceof ApiError ? e.message : "Failed" });
+      }
+    }
+    setResults(out);
+    setPhase("done");
+    setSubmitting(false);
+    if (out.some(r => r.ok)) onDone();
+  };
+
+  const validCount = parsed.filter(a => a.errors.length === 0).length;
+  const errorCount = parsed.filter(a => a.errors.length > 0).length;
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); }}>
+      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+        <DialogHeader>
+          <DialogTitle>Upload AIE records</DialogTitle>
+          <DialogDescription>
+            One row per line item. Rows sharing the same AIE No are merged into a single record.
+          </DialogDescription>
+        </DialogHeader>
+
+        {phase === "idle" && (
+          <div className="space-y-4 flex-1 overflow-y-auto">
+            <div className="rounded-md border border-border bg-muted/30 p-3 text-[12px] text-muted-foreground space-y-1">
+              <p className="font-medium text-foreground">Required columns (exact header names):</p>
+              <p className="font-mono text-[11px]">{UPLOAD_HEADERS.join(", ")}</p>
+              <p className="mt-1"><span className="font-medium text-foreground">Item Code</span> must be one of: {AIE_ITEM_CODES.join(", ")}.</p>
+              <p><span className="font-medium text-foreground">AIE No</span> format: AIE/YYYY/MM/NNNN (e.g. AIE/2026/01/0001).</p>
+              <p><span className="font-medium text-foreground">Expires On</span> is optional — leave blank if not applicable.</p>
+            </div>
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={downloadTemplate}>
+                <Download className="h-3.5 w-3.5 mr-1" />Download template
+              </Button>
+              <label className="inline-flex">
+                <Button type="button" size="sm" asChild>
+                  <span><Upload className="h-3.5 w-3.5 mr-1" />Choose file</span>
+                </Button>
+                <input ref={fileRef} type="file" accept={UPLOAD_ACCEPT} className="hidden" onChange={onFile} />
+              </label>
+            </div>
+          </div>
+        )}
+
+        {phase === "preview" && (
+          <div className="flex-1 overflow-y-auto space-y-3">
+            <div className="flex items-center gap-3 text-[12px]">
+              <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" />{validCount} ready</span>
+              {errorCount > 0 && <span className="inline-flex items-center gap-1 text-destructive"><AlertCircle className="h-3.5 w-3.5" />{errorCount} with errors (will be skipped)</span>}
+            </div>
+            <div className="rounded-md border border-border divide-y divide-border max-h-72 overflow-y-auto text-[12px]">
+              {parsed.map((a) => (
+                <div key={a.aieNo} className={`px-3 py-2 ${a.errors.length ? "bg-destructive/5" : ""}`}>
+                  <div className="flex items-center gap-2">
+                    {a.errors.length === 0
+                      ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                      : <AlertCircle className="h-3.5 w-3.5 text-destructive shrink-0" />}
+                    <span className="font-mono font-semibold">{a.aieNo}</span>
+                    {a.errors.length === 0 && (
+                      <span className="text-muted-foreground ml-auto">{a.lines.length} line{a.lines.length === 1 ? "" : "s"} · {a.recipientUnit} · FY {a.fiscalYear}</span>
+                    )}
+                  </div>
+                  {a.errors.length > 0 && (
+                    <ul className="mt-1 ml-6 text-[11px] text-destructive space-y-0.5">
+                      {a.errors.map((err, i) => <li key={i}>{err}</li>)}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {phase === "done" && (
+          <div className="flex-1 overflow-y-auto space-y-2">
+            <p className="text-[12px] text-muted-foreground">{results.filter(r => r.ok).length} created · {results.filter(r => !r.ok).length} failed</p>
+            <div className="rounded-md border border-border divide-y divide-border max-h-72 overflow-y-auto text-[12px]">
+              {results.map(r => (
+                <div key={r.aieNo} className="flex items-center gap-2 px-3 py-2">
+                  {r.ok
+                    ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                    : <AlertCircle className="h-3.5 w-3.5 text-destructive shrink-0" />}
+                  <span className="font-mono">{r.aieNo}</span>
+                  <span className={`ml-auto text-[11px] ${r.ok ? "text-muted-foreground" : "text-destructive"}`}>{r.message}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <DialogFooter>
+          {phase === "idle" && (
+            <Button type="button" variant="ghost" onClick={handleClose}>Cancel</Button>
+          )}
+          {phase === "preview" && (
+            <>
+              <Button type="button" variant="ghost" onClick={reset}>Back</Button>
+              <Button type="button" onClick={submit} disabled={submitting || validCount === 0}>
+                {submitting && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+                Import {validCount} AIE{validCount === 1 ? "" : "s"}
+              </Button>
+            </>
+          )}
+          {phase === "done" && (
+            <Button type="button" onClick={handleClose}>Done</Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function AIERecordsPage() {
   const [tab, setTab] = useState<Tab>("ALL");
   const [rows, setRows] = useState<Aie[]>([]);
@@ -125,10 +392,22 @@ export default function AIERecordsPage() {
 
   const [fyTotalsYear, setFyTotalsYear] = useState<number>(currentYear);
   const [fyTotal, setFyTotal] = useState<number | null>(null);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [budgetCategories, setBudgetCategories] = useState<BudgetCategory[]>([]);
+  const [budgetRefLoading, setBudgetRefLoading] = useState(false);
 
   useEffect(() => {
     document.title = "AIE Records – NPF BMS";
   }, []);
+
+  useEffect(() => {
+    if (!editor.open) return;
+    setBudgetRefLoading(true);
+    getBudgetCodeReference()
+      .then(ref => setBudgetCategories(ref.categories))
+      .catch(() => toast.error("Could not load budget codes."))
+      .finally(() => setBudgetRefLoading(false));
+  }, [editor.open]);
 
   const fetchRows = async () => {
     setLoading(true);
@@ -310,6 +589,10 @@ export default function AIERecordsPage() {
             <RefreshCw className={`h-3.5 w-3.5 mr-1 ${loading ? "animate-spin" : ""}`} />
             Refresh
           </Button>
+          <Button type="button" variant="outline" size="sm" onClick={() => setUploadOpen(true)}>
+            <Upload className="h-3.5 w-3.5 mr-1" />
+            Upload CSV/XLSX
+          </Button>
           <Button type="button" size="sm" onClick={openCreate}>
             <Plus className="h-3.5 w-3.5 mr-1" />
             New AIE
@@ -489,29 +772,56 @@ export default function AIERecordsPage() {
                   Total: <span className="font-semibold text-foreground">{fmtNGN(editorTotal)}</span>
                 </div>
               </div>
-              <div className="border border-border rounded-md divide-y divide-border max-h-72 overflow-y-auto">
-                {editor.lines.map((l, idx) => (
-                  <div key={idx} className="grid grid-cols-[180px_1fr_140px_36px] gap-2 px-2 py-2 items-center">
-                    <Select value={l.itemCode || undefined}
-                      onValueChange={(v) => updateLine(idx, { itemCode: v as AieItemCode })}>
-                      <SelectTrigger className="h-8 text-[12px]"><SelectValue placeholder="Item code" /></SelectTrigger>
-                      <SelectContent>
-                        {AIE_ITEM_CODES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                    <Input value={l.subItemCode} onChange={e => updateLine(idx, { subItemCode: e.target.value.toUpperCase() })}
-                      placeholder="Sub-item code (e.g. LOCAL_TRANSPORT)" maxLength={120} className="h-8 font-mono text-[12px]" />
-                    <Input type="number" min={0.01} step={0.01} value={l.amount}
-                      onChange={e => updateLine(idx, { amount: e.target.value })}
-                      placeholder="Amount" className="h-8 text-[12px] text-right" />
-                    <Button type="button" variant="ghost" size="sm" className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-                      onClick={() => removeLine(idx)} disabled={editor.lines.length === 1} title="Remove line">
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-              <Button type="button" size="sm" variant="outline" onClick={addLine}>
+              {budgetRefLoading ? (
+                <div className="flex items-center gap-2 py-4 text-[12px] text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />Loading budget codes…
+                </div>
+              ) : (
+                <div className="border border-border rounded-md divide-y divide-border max-h-72 overflow-y-auto">
+                  {editor.lines.map((l, idx) => {
+                    const catSubItems = budgetCategories.find(c => c.code === l.itemCode)?.subItems ?? [];
+                    return (
+                      <div key={idx} className="grid grid-cols-[1fr_1fr_140px_36px] gap-2 px-2 py-2 items-center">
+                        <Select value={l.itemCode || undefined}
+                          onValueChange={(v) => updateLine(idx, { itemCode: v, subItemCode: "" })}>
+                          <SelectTrigger className="h-8 text-[12px]"><SelectValue placeholder="Category" /></SelectTrigger>
+                          <SelectContent>
+                            {budgetCategories.map(c => (
+                              <SelectItem key={c.code} value={c.code} className="text-[12px]">
+                                <span className="font-mono">{c.code}</span>
+                                <span className="text-muted-foreground ml-1">— {c.name}</span>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Select value={l.subItemCode || undefined}
+                          onValueChange={(v) => updateLine(idx, { subItemCode: v })}
+                          disabled={!l.itemCode || catSubItems.length === 0}>
+                          <SelectTrigger className="h-8 text-[12px]">
+                            <SelectValue placeholder={l.itemCode ? "Sub-item" : "Pick category first"} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {catSubItems.map(s => (
+                              <SelectItem key={s.code} value={s.code} className="text-[12px]">
+                                <span className="font-mono">{s.code}</span>
+                                <span className="text-muted-foreground ml-1">— {s.name}</span>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Input type="number" min={0.01} step={0.01} value={l.amount}
+                          onChange={e => updateLine(idx, { amount: e.target.value })}
+                          placeholder="Amount" className="h-8 text-[12px] text-right" />
+                        <Button type="button" variant="ghost" size="sm" className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                          onClick={() => removeLine(idx)} disabled={editor.lines.length === 1} title="Remove line">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <Button type="button" size="sm" variant="outline" onClick={addLine} disabled={budgetRefLoading}>
                 <Plus className="h-3.5 w-3.5 mr-1" />Add line
               </Button>
             </div>
@@ -528,6 +838,9 @@ export default function AIERecordsPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Bulk upload dialog */}
+      <AieBulkUploadDialog open={uploadOpen} onClose={() => setUploadOpen(false)} onDone={fetchRows} />
 
       {/* Reject dialog */}
       <Dialog open={!!rejecting} onOpenChange={(o) => { if (!o) { setRejecting(null); setRejectReason(""); } }}>

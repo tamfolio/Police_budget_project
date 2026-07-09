@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { listAies } from "@/lib/aiesApi";
+import { listFundInflows } from "@/lib/fundInflowsApi";
+import { listExpenditures } from "@/lib/expendituresApi";
 
 export type PendingItem = {
   id: string;
@@ -13,77 +15,104 @@ export type PendingItem = {
   href: string;
 };
 
-const MODULES = [
-  { table: "aie_records",          path: "/aie",            label: "AIE",          nameField: "aie_no",        amountField: "amount" },
-  { table: "fund_inflows",         path: "/fund-inflows",   label: "Inflow",       nameField: "reference_no",  amountField: "amount" },
-  { table: "distribution_batches", path: "/distributions",  label: "Distribution", nameField: "period_month",  amountField: "distributed_total" },
-  { table: "expenditures",         path: "/expenditures",   label: "Expenditure",  nameField: "voucher_no",    amountField: "gross_amount" },
-] as const;
-
 export function usePendingApprovals(pollMs = 60_000) {
-  const { user, hasRole } = useAuth();
+  const { hasRole } = useAuth();
   const [items, setItems] = useState<PendingItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
-    if (!user) { setItems([]); setLoading(false); return; }
-    const uid = user.id;
     const isOff = hasRole("BUDGET_OFF");
     const isDir = hasRole("BUDGET_DIR");
     const isClk = hasRole("BUDGET_CLK");
 
     const all: PendingItem[] = [];
 
-    for (const m of MODULES) {
-      const cols = `id, created_at, status, created_by, submitted_by, reviewed_by, ${m.nameField}, ${m.amountField}`;
-
+    try {
       if (isOff) {
-        const { data } = await (supabase.from(m.table) as any)
-          .select(cols).eq("status", "SUBMITTED").neq("created_by", uid)
-          .order("created_at", { ascending: true });
-        (data ?? []).forEach((r: any) => {
-          if (r.submitted_by && r.submitted_by === uid) return;
-          all.push({
-            id: r.id, table: m.table as any, label: `${m.label} ${r[m.nameField] ?? ""}`.trim(),
-            amount: r[m.amountField] != null ? Number(r[m.amountField]) : null,
-            status: r.status, reason: "AWAITING_REVIEW", created_at: r.created_at,
-            href: `${m.path}?focus=${r.id}`,
-          });
-        });
+        const [aies, inflows, exps] = await Promise.all([
+          listAies({ status: "PENDING_REVIEW" }),
+          listFundInflows({ status: "PENDING_REVIEW" }),
+          listExpenditures({ status: "SUBMITTED" }),
+        ]);
+        aies.forEach(r => all.push({
+          id: r.id, table: "aie_records", status: r.status, reason: "AWAITING_REVIEW",
+          label: `AIE ${r.aieNo ?? ""}`.trim(),
+          amount: r.totalAmount != null ? Number(r.totalAmount) : null,
+          created_at: r.createdAt ?? "", href: `/aie?focus=${r.id}`,
+        }));
+        inflows.forEach(r => all.push({
+          id: r.id, table: "fund_inflows", status: r.status, reason: "AWAITING_REVIEW",
+          label: `Inflow ${r.referenceNo ?? ""}`.trim(),
+          amount: r.amount != null ? Number(r.amount) : null,
+          created_at: r.createdAt ?? "", href: `/fund-inflows?focus=${r.id}`,
+        }));
+        exps.forEach(r => all.push({
+          id: r.id, table: "expenditures", status: r.status, reason: "AWAITING_REVIEW",
+          label: `Expenditure ${r.voucherNo ?? ""}`.trim(),
+          amount: r.grossAmount != null ? Number(r.grossAmount) : null,
+          created_at: r.createdAt ?? "", href: `/expenditures?focus=${r.id}`,
+        }));
       }
+
       if (isDir) {
-        const { data } = await (supabase.from(m.table) as any)
-          .select(cols).eq("status", "OFFICER_REVIEWED").neq("created_by", uid)
-          .order("created_at", { ascending: true });
-        (data ?? []).forEach((r: any) => {
-          if ((r.submitted_by && r.submitted_by === uid) || (r.reviewed_by && r.reviewed_by === uid)) return;
-          all.push({
-            id: r.id, table: m.table as any, label: `${m.label} ${r[m.nameField] ?? ""}`.trim(),
-            amount: r[m.amountField] != null ? Number(r[m.amountField]) : null,
-            status: r.status, reason: "AWAITING_APPROVAL", created_at: r.created_at,
-            href: `${m.path}?focus=${r.id}`,
-          });
-        });
+        const [aies, inflows, exps] = await Promise.all([
+          listAies({ status: "PENDING_APPROVAL" }),
+          listFundInflows({ status: "PENDING_APPROVAL" }),
+          listExpenditures({ status: "OFFICER_REVIEWED" }),
+        ]);
+        aies.forEach(r => all.push({
+          id: r.id, table: "aie_records", status: r.status, reason: "AWAITING_APPROVAL",
+          label: `AIE ${r.aieNo ?? ""}`.trim(),
+          amount: r.totalAmount != null ? Number(r.totalAmount) : null,
+          created_at: r.createdAt ?? "", href: `/aie?focus=${r.id}`,
+        }));
+        inflows.forEach(r => all.push({
+          id: r.id, table: "fund_inflows", status: r.status, reason: "AWAITING_APPROVAL",
+          label: `Inflow ${r.referenceNo ?? ""}`.trim(),
+          amount: r.amount != null ? Number(r.amount) : null,
+          created_at: r.createdAt ?? "", href: `/fund-inflows?focus=${r.id}`,
+        }));
+        exps.forEach(r => all.push({
+          id: r.id, table: "expenditures", status: r.status, reason: "AWAITING_APPROVAL",
+          label: `Expenditure ${r.voucherNo ?? ""}`.trim(),
+          amount: r.grossAmount != null ? Number(r.grossAmount) : null,
+          created_at: r.createdAt ?? "", href: `/expenditures?focus=${r.id}`,
+        }));
       }
+
       if (isClk) {
-        const { data } = await (supabase.from(m.table) as any)
-          .select(cols).eq("status", "RETURNED").eq("created_by", uid)
-          .order("created_at", { ascending: false });
-        (data ?? []).forEach((r: any) => {
-          all.push({
-            id: r.id, table: m.table as any, label: `${m.label} ${r[m.nameField] ?? ""}`.trim(),
-            amount: r[m.amountField] != null ? Number(r[m.amountField]) : null,
-            status: r.status, reason: "RETURNED_TO_ME", created_at: r.created_at,
-            href: `${m.path}?focus=${r.id}`,
-          });
-        });
+        const [aies, inflows, exps] = await Promise.all([
+          listAies({ status: "REJECTED" }),
+          listFundInflows({ status: "REJECTED" }),
+          listExpenditures({ status: "RETURNED" }),
+        ]);
+        aies.forEach(r => all.push({
+          id: r.id, table: "aie_records", status: r.status, reason: "RETURNED_TO_ME",
+          label: `AIE ${r.aieNo ?? ""}`.trim(),
+          amount: r.totalAmount != null ? Number(r.totalAmount) : null,
+          created_at: r.createdAt ?? "", href: `/aie?focus=${r.id}`,
+        }));
+        inflows.forEach(r => all.push({
+          id: r.id, table: "fund_inflows", status: r.status, reason: "RETURNED_TO_ME",
+          label: `Inflow ${r.referenceNo ?? ""}`.trim(),
+          amount: r.amount != null ? Number(r.amount) : null,
+          created_at: r.createdAt ?? "", href: `/fund-inflows?focus=${r.id}`,
+        }));
+        exps.forEach(r => all.push({
+          id: r.id, table: "expenditures", status: r.status, reason: "RETURNED_TO_ME",
+          label: `Expenditure ${r.voucherNo ?? ""}`.trim(),
+          amount: r.grossAmount != null ? Number(r.grossAmount) : null,
+          created_at: r.createdAt ?? "", href: `/expenditures?focus=${r.id}`,
+        }));
       }
+    } catch {
+      // keep previous state on error
     }
 
-    all.sort((a, b) => a.created_at < b.created_at ? 1 : -1);
+    all.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
     setItems(all);
     setLoading(false);
-  }, [user, hasRole]);
+  }, [hasRole]);
 
   useEffect(() => {
     refresh();
