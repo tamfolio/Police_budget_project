@@ -53,18 +53,11 @@ export async function getAdminUser(id: string) {
   return apiFetch<AdminUser>(`/admin/users/${encodeURIComponent(id)}`);
 }
 
-/** POST /admin/users/invite — invite one or more users. */
-export async function inviteUsers(invites: InviteUserInput[]) {
-  return apiFetch<AdminUser[]>(`/admin/users/invite`, {
+/** POST /auth/invite — invite a single user. */
+export async function inviteUsers(invite: InviteUserInput) {
+  return apiFetch<AdminUser>(`/auth/invite`, {
     method: "POST",
-    body: invites,
-  });
-}
-
-/** POST /admin/users/:id/activate — activate a deactivated user. */
-export async function activateUser(id: string) {
-  return apiFetch<AdminUser>(`/admin/users/${encodeURIComponent(id)}/activate`, {
-    method: "POST",
+    body: invite,
   });
 }
 

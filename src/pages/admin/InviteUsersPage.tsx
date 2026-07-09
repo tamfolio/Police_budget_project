@@ -66,9 +66,12 @@ export default function InviteUsersPage() {
     }
     setSubmitting(true);
     try {
-      const created = await inviteUsers(cleaned);
-      toast.success(`Sent ${created.length} invitation${created.length === 1 ? "" : "s"}.`);
-      setRows([blankRow()]);
+      const results = await Promise.allSettled(cleaned.map(invite => inviteUsers(invite)));
+      const ok = results.filter(r => r.status === "fulfilled").length;
+      const failed = results.filter(r => r.status === "rejected").length;
+      if (ok > 0) toast.success(`Sent ${ok} invitation${ok === 1 ? "" : "s"}.`);
+      if (failed > 0) toast.error(`${failed} invitation${failed === 1 ? "" : "s"} failed to send.`);
+      if (ok > 0) setRows([blankRow()]);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Failed to send invitations");
     } finally {

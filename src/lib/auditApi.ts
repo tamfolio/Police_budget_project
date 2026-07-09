@@ -65,15 +65,17 @@ function qs(params: Record<string, string | number | undefined>) {
 }
 
 export async function listHttpLogs(params: ListHttpLogsParams = {}) {
+  const merged = { page: 1, ...params };
   const data = await apiFetch<{ logs?: AuditHttpLog[]; pagination?: Pagination }>(
-    `/audit/logs${qs(params as Record<string, string | number | undefined>)}`,
+    `/audit/http-logs${qs(merged as Record<string, string | number | undefined>)}`,
   );
   return { logs: data?.logs ?? [], pagination: data?.pagination ?? {} };
 }
 
 export async function listAuditEntries(params: ListAuditEntriesParams = {}) {
-  const data = await apiFetch<{ events?: AuditEntry[]; entries?: AuditEntry[]; pagination?: Pagination }>(
-    `/audit/events${qs(params as Record<string, string | number | undefined>)}`,
+  const merged = { page: 1, ...params };
+  const data = await apiFetch<{ entries?: AuditEntry[]; pagination?: Pagination }>(
+    `/audit/entries${qs(merged as Record<string, string | number | undefined>)}`,
   );
-  return { entries: data?.events ?? data?.entries ?? [], pagination: data?.pagination ?? {} };
+  return { entries: data?.entries ?? [], pagination: data?.pagination ?? {} };
 }

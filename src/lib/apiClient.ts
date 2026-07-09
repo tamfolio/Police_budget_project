@@ -92,7 +92,7 @@ export async function apiFetch<T = unknown>(path: string, opts: ApiFetchOptions 
   try { payload = (await res.json()) as ApiEnvelope<T>; } catch { /* non-JSON */ }
 
   // On 401, try a one-shot refresh and retry the original request before giving up.
-  if (res.status === 401 && !skipAuth && !_retried && path !== "/auth/refresh-token") {
+  if (res.status === 401 && !skipAuth && !_retried && path !== "/auth/refresh") {
     const newToken = await refreshAccessToken();
     if (newToken) {
       return apiFetch<T>(path, opts, true);

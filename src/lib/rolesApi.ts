@@ -88,5 +88,5 @@ export interface CreatePermissionPayload {
 }
 
 export async function createPermission(payload: CreatePermissionPayload) {
-  return apiFetch<ApiPermission>(`/permissions`, { method: "POST", body: payload });
+  return apiFetch<ApiPermission>(`/admin/permissions`, { method: "POST", body: payload });
 }
