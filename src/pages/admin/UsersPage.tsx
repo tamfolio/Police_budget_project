@@ -10,10 +10,10 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import {
-  AlertTriangle, Check, Loader2, RefreshCw, Shield, UserCheck, UserX, Users as UsersIcon,
+  AlertTriangle, Check, Loader2, RefreshCw, Shield, UserX, Users as UsersIcon,
 } from "lucide-react";
 import {
-  listAdminUsers, inviteUsers, activateUser, deactivateUser, type AdminUser,
+  listAdminUsers, inviteUsers, deactivateUser, type AdminUser,
 } from "@/lib/usersApi";
 import { listRoles, type ApiRoleSummary } from "@/lib/rolesApi";
 import { ApiError } from "@/lib/apiClient";
@@ -96,7 +96,7 @@ export default function AdminUsersPage() {
     }
     setInviting(true);
     try {
-      await inviteUsers([{ email: inviteEmail.trim(), fullName: inviteFullName.trim(), roleId: inviteRoleId }]);
+      await inviteUsers({ email: inviteEmail.trim(), fullName: inviteFullName.trim(), roleId: inviteRoleId });
       toast.success(`Invitation sent to ${inviteEmail.trim()}.`);
       setInviteEmail("");
       setInviteFullName("");
@@ -108,16 +108,11 @@ export default function AdminUsersPage() {
     }
   };
 
-  const handleToggleActive = async (u: AdminUser) => {
+  const handleDeactivate = async (u: AdminUser) => {
     setToggling(u.id);
     try {
-      if (u.isActive) {
-        await deactivateUser(u.id);
-        toast.success(`${u.fullName || u.email} deactivated.`);
-      } else {
-        await activateUser(u.id);
-        toast.success(`${u.fullName || u.email} activated.`);
-      }
+      await deactivateUser(u.id);
+      toast.success(`${u.fullName || u.email} deactivated.`);
       refresh();
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "Action failed.");
@@ -275,18 +270,16 @@ export default function AdminUsersPage() {
                     {fmtLast(u.lastLogin)}
                   </td>
                   <td className="p-2 text-right">
-                    {u.id !== user?.id && (
+                    {u.id !== user?.id && u.isActive && (
                       <Button
                         type="button" size="sm" variant="ghost"
-                        className={`h-7 text-[11px] ${u.isActive ? "" : "text-green-700 hover:text-green-700"}`}
+                        className="h-7 text-[11px]"
                         disabled={toggling === u.id}
-                        onClick={() => handleToggleActive(u)}
+                        onClick={() => handleDeactivate(u)}
                       >
                         {toggling === u.id
                           ? <Loader2 className="h-3 w-3 animate-spin" />
-                          : u.isActive
-                            ? <><UserX className="h-3 w-3 mr-1" />Deactivate</>
-                            : <><UserCheck className="h-3 w-3 mr-1" />Activate</>}
+                          : <><UserX className="h-3 w-3 mr-1" />Deactivate</>}
                       </Button>
                     )}
                   </td>
@@ -299,7 +292,7 @@ export default function AdminUsersPage() {
 
       <p className="text-[11px] text-muted-foreground">
         <span className="font-semibold">Deactivate</span> blocks sign-in but preserves all history.
-        To change a user's role, deactivate them and send a new invite with the updated role.
+        To re-activate a deactivated user or change their role, send a new invite with the correct role.
       </p>
     </div>
   );
