@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from "@/components/ui/command";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { listAies } from "@/lib/aiesApi";
+import { listFundInflows } from "@/lib/fundInflowsApi";
+import { listExpenditures } from "@/lib/expendituresApi";
+import { listDistributionPeriods, type DistributionZonePeriod } from "@/lib/distributionsApi";
 import { Banknote, FileSignature, Receipt, Layers, LayoutDashboard, BarChart3, Timer, ShieldCheck, BookOpen, Users, Keyboard } from "lucide-react";
 
 type Hit = { type: "aie" | "inflow" | "expenditure" | "distribution"; id: string; label: string; sub: string; to: string };
 
-const NAV: { label: string; to: string; Icon: React.ComponentType<{ className?: string }> ; shortcut?: string }[] = [
+const NAV: { label: string; to: string; Icon: React.ComponentType<{ className?: string }>; shortcut?: string }[] = [
   { label: "Dashboard",       to: "/",                       Icon: LayoutDashboard, shortcut: "g h" },
   { label: "Fund Inflows",    to: "/fund-inflows",           Icon: Banknote,        shortcut: "g f" },
   { label: "AIE Records",     to: "/aie",                    Icon: FileSignature,   shortcut: "g a" },
@@ -19,7 +22,11 @@ const NAV: { label: string; to: string; Icon: React.ComponentType<{ className?: 
   { label: "Admin Users",     to: "/admin/users",            Icon: Users            },
 ];
 
-export function CommandPalette({ open, onOpenChange, onShowShortcuts }: { open: boolean; onOpenChange: (b: boolean) => void; onShowShortcuts: () => void }) {
+export function CommandPalette({ open, onOpenChange, onShowShortcuts }: {
+  open: boolean;
+  onOpenChange: (b: boolean) => void;
+  onShowShortcuts: () => void;
+}) {
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<Hit[]>([]);
   const [loading, setLoading] = useState(false);
@@ -27,47 +34,88 @@ export function CommandPalette({ open, onOpenChange, onShowShortcuts }: { open: 
 
   useEffect(() => { if (!open) { setQ(""); setHits([]); } }, [open]);
 
-  // Debounced cross-table search by record number/identifier.
   useEffect(() => {
     if (!open) return;
-    const term = q.trim();
+    const term = q.trim().toLowerCase();
     if (term.length < 2) { setHits([]); return; }
+
     let cancelled = false;
     setLoading(true);
+
     const handle = setTimeout(async () => {
-      const like = `%${term}%`;
-      const [aie, fi, ex, db] = await Promise.all([
-        supabase.from("aie_records").select("id,aie_no,recipient_unit,amount,fiscal_year").ilike("aie_no", like).limit(8),
-        supabase.from("fund_inflows").select("id,reference_no,source,amount,fiscal_year").ilike("reference_no", like).limit(8),
-        supabase.from("expenditures").select("id,voucher_no,payee,gross_amount,fiscal_year").ilike("voucher_no", like).limit(8),
-        supabase.from("distribution_batches").select("id,fiscal_year,period_month,distributed_total").limit(50),
-      ]);
-      if (cancelled) return;
-      const out: Hit[] = [];
-      (aie.data ?? []).forEach((r: any) => out.push({ type: "aie", id: r.id, label: r.aie_no, sub: `${r.recipient_unit} · FY ${r.fiscal_year}`, to: "/aie" }));
-      (fi.data ?? []).forEach((r: any) => out.push({ type: "inflow", id: r.id, label: r.reference_no, sub: `${r.source} · FY ${r.fiscal_year}`, to: "/fund-inflows" }));
-      (ex.data ?? []).forEach((r: any) => out.push({ type: "expenditure", id: r.id, label: r.voucher_no, sub: `${r.payee} · FY ${r.fiscal_year}`, to: "/expenditures" }));
-      // distribution_batches has no human number — match by short id prefix
-      const shortMatch = (db.data ?? []).filter((r: any) =>
-        r.id.toLowerCase().startsWith(term.toLowerCase()) || String(r.fiscal_year).includes(term)
-      ).slice(0, 6);
-      shortMatch.forEach((r: any) => out.push({ type: "distribution", id: r.id, label: r.id.slice(0, 8), sub: `Batch · FY ${r.fiscal_year} · M${r.period_month}`, to: "/distributions" }));
-      setHits(out);
-      setLoading(false);
+      try {
+        const [aies, inflows, exps, dists] = await Promise.all([
+          listAies(),
+          listFundInflows(),
+          listExpenditures(),
+          listDistributionPeriods<DistributionZonePeriod>("zone").catch(() => []),
+        ]);
+
+        if (cancelled) return;
+
+        const out: Hit[] = [];
+
+        aies
+          .filter(r => (r.aieNo ?? "").toLowerCase().includes(term) || (r.recipientUnit ?? "").toLowerCase().includes(term))
+          .slice(0, 8)
+          .forEach(r => out.push({
+            type: "aie", id: r.id,
+            label: r.aieNo ?? r.id.slice(0, 8),
+            sub: `${r.recipientUnit ?? ""} · FY ${r.fiscalYear}`,
+            to: "/aie",
+          }));
+
+        inflows
+          .filter(r => (r.referenceNo ?? "").toLowerCase().includes(term) || String(r.fiscalYear).includes(term))
+          .slice(0, 8)
+          .forEach(r => out.push({
+            type: "inflow", id: r.id,
+            label: r.referenceNo ?? r.id.slice(0, 8),
+            sub: `${r.source} · FY ${r.fiscalYear}`,
+            to: "/fund-inflows",
+          }));
+
+        exps
+          .filter(r => (r.voucherNo ?? "").toLowerCase().includes(term) || (r.payee ?? "").toLowerCase().includes(term))
+          .slice(0, 8)
+          .forEach(r => out.push({
+            type: "expenditure", id: r.id,
+            label: r.voucherNo ?? r.id.slice(0, 8),
+            sub: `${r.payee ?? ""} · FY ${r.fiscalYear}`,
+            to: "/expenditures",
+          }));
+
+        dists
+          .filter(r => r.id.toLowerCase().startsWith(term) || (r.label ?? "").toLowerCase().includes(term))
+          .slice(0, 6)
+          .forEach(r => out.push({
+            type: "distribution", id: r.id,
+            label: r.id.slice(0, 8),
+            sub: `Distribution · ${r.label ?? ""}`,
+            to: "/distributions",
+          }));
+
+        setHits(out);
+      } catch {
+        // leave hits empty on error
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }, 220);
+
     return () => { cancelled = true; clearTimeout(handle); };
   }, [q, open]);
 
   const groupedHits = useMemo(() => ({
-    aie: hits.filter(h => h.type === "aie"),
-    inflow: hits.filter(h => h.type === "inflow"),
-    expenditure: hits.filter(h => h.type === "expenditure"),
+    aie:          hits.filter(h => h.type === "aie"),
+    inflow:       hits.filter(h => h.type === "inflow"),
+    expenditure:  hits.filter(h => h.type === "expenditure"),
     distribution: hits.filter(h => h.type === "distribution"),
   }), [hits]);
 
   const go = (to: string, focus?: string) => {
     onOpenChange(false);
-    if (focus) navigate(`${to}#focus=${focus}`); else navigate(to);
+    navigate(focus ? `${to}?focus=${focus}` : to);
   };
 
   return (
@@ -79,13 +127,16 @@ export function CommandPalette({ open, onOpenChange, onShowShortcuts }: { open: 
       />
       <CommandList>
         {loading && <div className="px-3 py-2 text-[11px] text-muted-foreground">Searching…</div>}
-        {!loading && q.trim().length >= 2 && hits.length === 0 && <CommandEmpty>No results for "{q}".</CommandEmpty>}
+        {!loading && q.trim().length >= 2 && hits.length === 0 && (
+          <CommandEmpty>No results for "{q}".</CommandEmpty>
+        )}
 
         {groupedHits.aie.length > 0 && (
           <CommandGroup heading="AIE Records">
             {groupedHits.aie.map(h => (
               <CommandItem key={h.id} value={`aie ${h.label} ${h.sub}`} onSelect={() => go(h.to, h.id)}>
-                <FileSignature className="h-3.5 w-3.5 mr-2" /><span className="font-medium">{h.label}</span>
+                <FileSignature className="h-3.5 w-3.5 mr-2" />
+                <span className="font-medium">{h.label}</span>
                 <span className="ml-2 text-[11px] text-muted-foreground">{h.sub}</span>
               </CommandItem>
             ))}
@@ -95,7 +146,8 @@ export function CommandPalette({ open, onOpenChange, onShowShortcuts }: { open: 
           <CommandGroup heading="Fund Inflows">
             {groupedHits.inflow.map(h => (
               <CommandItem key={h.id} value={`inflow ${h.label} ${h.sub}`} onSelect={() => go(h.to, h.id)}>
-                <Banknote className="h-3.5 w-3.5 mr-2" /><span className="font-medium">{h.label}</span>
+                <Banknote className="h-3.5 w-3.5 mr-2" />
+                <span className="font-medium">{h.label}</span>
                 <span className="ml-2 text-[11px] text-muted-foreground">{h.sub}</span>
               </CommandItem>
             ))}
@@ -105,7 +157,8 @@ export function CommandPalette({ open, onOpenChange, onShowShortcuts }: { open: 
           <CommandGroup heading="Expenditures">
             {groupedHits.expenditure.map(h => (
               <CommandItem key={h.id} value={`exp ${h.label} ${h.sub}`} onSelect={() => go(h.to, h.id)}>
-                <Receipt className="h-3.5 w-3.5 mr-2" /><span className="font-medium">{h.label}</span>
+                <Receipt className="h-3.5 w-3.5 mr-2" />
+                <span className="font-medium">{h.label}</span>
                 <span className="ml-2 text-[11px] text-muted-foreground">{h.sub}</span>
               </CommandItem>
             ))}
@@ -115,7 +168,8 @@ export function CommandPalette({ open, onOpenChange, onShowShortcuts }: { open: 
           <CommandGroup heading="Distributions">
             {groupedHits.distribution.map(h => (
               <CommandItem key={h.id} value={`dist ${h.label}`} onSelect={() => go(h.to, h.id)}>
-                <Layers className="h-3.5 w-3.5 mr-2" /><span className="font-medium">{h.label}</span>
+                <Layers className="h-3.5 w-3.5 mr-2" />
+                <span className="font-medium">{h.label}</span>
                 <span className="ml-2 text-[11px] text-muted-foreground">{h.sub}</span>
               </CommandItem>
             ))}

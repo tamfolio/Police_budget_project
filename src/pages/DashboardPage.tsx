@@ -84,7 +84,7 @@ export default function DashboardPage() {
     },
     {
       label: "% Utilisation",
-      value: `${((cards?.utilization ?? 0) * 100).toFixed(1)}%`,
+      value: `${(cards?.utilization ?? 0).toFixed(1)}%`,
       sub: "Expenditure ÷ Fund Inflow",
       to: "/reports",
     },
