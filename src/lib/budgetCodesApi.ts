@@ -61,7 +61,7 @@ export async function listBudgetCodes(search?: string) {
 }
 
 export async function getBudgetCodeReference(search?: string) {
-  return apiFetch<BudgetCodeReferenceData>(`/budget-codes/reference-data${qs({ search })}`);
+  return apiFetch<BudgetCodeReferenceData>(`/budget-codes/reference${qs({ search })}`);
 }
 
 export async function seedBudgetCodes() {
