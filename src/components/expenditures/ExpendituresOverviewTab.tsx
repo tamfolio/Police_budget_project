@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { listAies } from "@/lib/aiesApi";
 import { getBudgetCodeReference } from "@/lib/budgetCodesApi";
+import { getExpenditureRollup, listExpenditures, type ExpenditureRollupItem, type ExpenditureRecord } from "@/lib/expendituresApi";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ChevronDown, ChevronRight, ArrowRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import {
-  SEED_PERIODS, ZONE_GROUP_LABELS,
+  ZONE_GROUP_LABELS,
   type Period, type ZoneGroupKey,
 } from "@/data/distributionBreakdown";
 import type { SimplePeriod } from "@/data/formationAllocations";
@@ -22,7 +23,6 @@ import {
   isTotalRow,
   zoneAmountColumnCount,
 } from "@/lib/distributionAggregation";
-import { AIE_TOTAL_2026 } from "@/data/fy2026Targets";
 import { toFullCode } from "@/lib/budgetCodes";
 
 const GROUP_KEYS: ZoneGroupKey[] = ["zone1_6", "zone7_12", "zone13_17"];
@@ -52,6 +52,8 @@ export default function ExpendituresOverviewTab() {
   const [aieLines, setAieLines] = useState<AieLine[]>([]);
   const [subs, setSubs] = useState<SubItem[]>([]);
   const [cats, setCats] = useState<Category[]>([]);
+  const [rollup, setRollup] = useState<ExpenditureRollupItem[]>([]);
+  const [approvedExpenditures, setApprovedExpenditures] = useState<ExpenditureRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [periodId, setPeriodId] = useState<string>(() => loadPeriods().slice(-1)[0]?.id ?? "");
@@ -71,9 +73,11 @@ export default function ExpendituresOverviewTab() {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const [apiAies, ref] = await Promise.all([
+      const [apiAies, ref, rollupData, expData] = await Promise.all([
         listAies(),
         getBudgetCodeReference(),
+        getExpenditureRollup().catch(() => [] as ExpenditureRollupItem[]),
+        listExpenditures({ status: "APPROVED" }).catch(() => [] as ExpenditureRecord[]),
       ]);
       setAies(apiAies.map(a => ({
         id: a.id,
@@ -101,6 +105,8 @@ export default function ExpendituresOverviewTab() {
         }))
       ));
       setCats(ref.categories.map(cat => ({ code: cat.code, name: cat.name })));
+      setRollup(rollupData);
+      setApprovedExpenditures(expData);
       setLoading(false);
     })();
   }, []);
@@ -141,27 +147,21 @@ export default function ExpendituresOverviewTab() {
     return m;
   }, [periods, formationPeriods, schoolPeriods]);
 
-  // AIE "spent" aggregated by sub-item code. Uses the same canonical
-  // FY2026 scaling factor as the AIE Records tab so the column shown here
-  // is literally "AIE Spent" — totals reconcile to ₦14,954,843,775.97.
+  // Approved expenditure net amounts aggregated by sub-item code (from /expenditures/rollup).
   const aieBySubItem = useMemo(() => {
     const m: Record<string, number> = {};
-    const dbTotal = aies.reduce((t, a) => t + Number(a.amount || 0), 0);
-    const factor = dbTotal > 0 ? AIE_TOTAL_2026 / dbTotal : 1;
-    aieLines.forEach(l => {
-      const code = toFullCode(l.sub_item_code);
-      m[code] = (m[code] || 0) + Number(l.amount || 0) * factor;
-    });
-    aies.forEach(a => {
-      if (!a.sub_item_code) return;
-      const hasLines = (linesByAie[a.id] || []).length > 0;
-      if (!hasLines) {
-        const code = toFullCode(a.sub_item_code);
-        m[code] = (m[code] || 0) + Number(a.amount || 0) * factor;
-      }
+    rollup.forEach(r => { m[r.code] = (m[r.code] || 0) + (Number(r.netAmount) || 0); });
+    return m;
+  }, [rollup]);
+
+  // Approved expenditure amounts grouped by linked AIE id (from /expenditures?status=APPROVED).
+  const expendByAieId = useMemo(() => {
+    const m: Record<string, number> = {};
+    approvedExpenditures.forEach(e => {
+      if (e.aieId) m[e.aieId] = (m[e.aieId] || 0) + (Number(e.netAmount) || 0);
     });
     return m;
-  }, [aies, aieLines, linesByAie]);
+  }, [approvedExpenditures]);
 
   const combinedRows = useMemo(() => {
     const codes = new Set<string>([...Object.keys(distBySubItem), ...Object.keys(aieBySubItem)]);
@@ -190,7 +190,7 @@ export default function ExpendituresOverviewTab() {
   // KPI tiles: Distribution is the live sum of all 3 sub-tabs (Zones +
   // Formation + Schools), with sub-total / grand-total rows excluded.
   const kpiDist = distBreakdown.total;
-  const kpiAie = AIE_TOTAL_2026;
+  const kpiAie = rollup.reduce((sum, r) => sum + (Number(r.netAmount) || 0), 0);
   const kpiTotal = kpiDist + kpiAie;
   const goToSummary = () => navigate("/distributions?tab=summary");
 
@@ -199,29 +199,9 @@ export default function ExpendituresOverviewTab() {
     return q ? aies.filter(a => a.aie_no.toLowerCase().includes(q) || a.recipient_unit.toLowerCase().includes(q)) : aies;
   }, [aies, search]);
 
-  // Scale per-record AIE amounts so the displayed "AIE Spent" column sums
-  // exactly to the canonical FY2026 AIE total (₦14,954,843,775.97). The
-  // last row absorbs the rounding residual so the total reconciles.
-  const aieSpentByRow = useMemo(() => {
-    const dbTotal = aies.reduce((t, a) => t + Number(a.amount || 0), 0);
-    const m: Record<string, number> = {};
-    if (dbTotal <= 0 || aies.length === 0) return m;
-    const factor = AIE_TOTAL_2026 / dbTotal;
-    let assigned = 0;
-    aies.forEach((a, i) => {
-      if (i === aies.length - 1) {
-        m[a.id] = +(AIE_TOTAL_2026 - assigned).toFixed(2);
-      } else {
-        const v = +(Number(a.amount || 0) * factor).toFixed(2);
-        m[a.id] = v;
-        assigned += v;
-      }
-    });
-    return m;
-  }, [aies]);
   const filteredAieTotal = useMemo(
-    () => filteredAies.reduce((t, a) => t + (aieSpentByRow[a.id] ?? Number(a.amount || 0)), 0),
-    [filteredAies, aieSpentByRow],
+    () => filteredAies.reduce((t, a) => t + (expendByAieId[a.id] ?? 0), 0),
+    [filteredAies, expendByAieId],
   );
 
   return (
@@ -361,7 +341,7 @@ export default function ExpendituresOverviewTab() {
                     {filteredAies.map((a, _i) => {
                       const ls = linesByAie[a.id] || [];
                       return (
-                        <AieRowDisplay key={a.id} index={_i + 1} a={a} lines={ls} subByCode={subByCode} displayAmount={aieSpentByRow[a.id] ?? Number(a.amount)} />
+                        <AieRowDisplay key={a.id} index={_i + 1} a={a} lines={ls} subByCode={subByCode} displayAmount={expendByAieId[a.id] ?? 0} />
                       );
                     })}
                     {filteredAies.length > 0 && (

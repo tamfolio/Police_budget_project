@@ -69,7 +69,12 @@ export interface ExpenditureRollupItem {
   netAmount: number;
 }
 
+export type ExpenditureView = "sub-item" | "distribution" | "aie";
+export type ExpenditureDistributionView = "zone" | "formations" | "schools" | "summary";
+
 export interface ListExpendituresParams {
+  view?: ExpenditureView;
+  distributionView?: ExpenditureDistributionView;
   status?: TransactionStatus;
   fiscalYear?: number;
 }
@@ -104,7 +109,8 @@ function asArray<T>(data: unknown): T[] {
 }
 
 export async function listExpenditures(params: ListExpendituresParams = {}) {
-  const data = await apiFetch<unknown>(`/expenditures${qs(params as Record<string, string | number | undefined>)}`);
+  const { view = "aie", ...rest } = params;
+  const data = await apiFetch<unknown>(`/expenditures${qs({ view, ...rest } as Record<string, string | number | undefined>)}`);
   return asArray<ExpenditureRecord>(data);
 }
 
@@ -158,6 +164,6 @@ export async function getExpenditureAuditTrail(id: string) {
 }
 
 export async function getExpenditureRollup(fiscalYear?: number) {
-  const data = await apiFetch<unknown>(`/expenditures/rollup${qs({ fiscalYear })}`);
+  const data = await apiFetch<unknown>(`/expenditures${qs({ view: "sub-item", fiscalYear })}`);
   return asArray<ExpenditureRollupItem>(data);
 }
