@@ -22,5 +22,5 @@ export async function getDashboardCards(month?: string) {
 
 export async function getInflowVsExpenditureChart(year?: string | number) {
   const q = year !== undefined ? `?year=${encodeURIComponent(String(year))}` : "";
-  return apiFetch<InflowVsExpenditurePoint[]>(`/dashboard/inflow-vs-expenditure${q}`);
+  return apiFetch<InflowVsExpenditurePoint[]>(`/dashboard/inflow-vs-expenditure-chart${q}`);
 }
