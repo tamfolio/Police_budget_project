@@ -63,7 +63,7 @@ export async function deleteRole(id: string) {
   return apiFetch<unknown>(`/roles/${id}`, { method: "DELETE" });
 }
 
-/** Best-effort permissions list. The /permissions endpoint follows the same
+/** Best-effort permissions list. The /roles/permissions endpoint follows the same
  *  pagination shape as /roles. Returns an empty array if the endpoint is
  *  unavailable so the UI can still render. */
 export async function listPermissions(params: { pageNumber?: number; pageSize?: number; search?: string } = {}) {
@@ -73,7 +73,7 @@ export async function listPermissions(params: { pageNumber?: number; pageSize?: 
   if (params.search) qs.set("search", params.search);
   try {
     return await apiFetch<{ permissions: ApiPermission[]; pagination: Pagination }>(
-      `/permissions?${qs.toString()}`,
+      `/roles/permissions?${qs.toString()}`,
     );
   } catch {
     return { permissions: [], pagination: { total: 0, perPage: 0, totalPages: 0, page: 1 } };
