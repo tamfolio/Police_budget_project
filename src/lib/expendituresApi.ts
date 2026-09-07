@@ -163,7 +163,16 @@ export async function getExpenditureAuditTrail(id: string) {
   return [];
 }
 
-export async function getExpenditureRollup(fiscalYear?: number) {
+export interface ExpenditureRollupResponse {
+  items: ExpenditureRollupItem[];
+  /** Total AIE expenditure from summary.aieSummary returned by the API. */
+  aieSummary: number;
+}
+
+export async function getExpenditureRollup(fiscalYear?: number): Promise<ExpenditureRollupResponse> {
   const data = await apiFetch<unknown>(`/expenditures${qs({ view: "sub-item", fiscalYear })}`);
-  return asArray<ExpenditureRollupItem>(data);
+  const obj = (data && typeof data === "object" && !Array.isArray(data)) ? data as Record<string, unknown> : {};
+  const summary = obj.summary as Record<string, unknown> | undefined;
+  const aieSummary = Number(summary?.aieSummary ?? 0);
+  return { items: asArray<ExpenditureRollupItem>(data), aieSummary };
 }
