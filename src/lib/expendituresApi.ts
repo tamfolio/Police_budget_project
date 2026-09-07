@@ -63,10 +63,12 @@ export type UpdateExpenditurePayload = Partial<CreateExpenditurePayload>;
 
 export interface ExpenditureRollupItem {
   code: string;
-  name: string;
-  grossAmount: number;
-  whtAmount: number;
-  netAmount: number;
+  /** Item label returned by the API as "item". */
+  item: string;
+  category: string;
+  distributionAmount: number;
+  aieAmount: number;
+  total: number;
 }
 
 export type ExpenditureView = "sub-item" | "distribution" | "aie";

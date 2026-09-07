@@ -149,17 +149,31 @@ export default function ExpendituresOverviewTab() {
     return m;
   }, [periods, formationPeriods, schoolPeriods]);
 
-  // Approved expenditure amounts aggregated by sub-item code (from /expenditures?view=sub-item).
-  // Try netAmount first, fall back to grossAmount or generic amount field.
+  // AIE spent amounts per sub-item code from the API's aieAmount field.
   const aieBySubItem = useMemo(() => {
     const m: Record<string, number> = {};
     rollup.forEach(r => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const amt = Number(r.netAmount || r.grossAmount || (r as any).amount || (r as any).totalAmount || 0);
-      m[r.code] = (m[r.code] || 0) + amt;
+      const amt = Number(r.aieAmount || 0);
+      if (amt) m[r.code] = (m[r.code] || 0) + amt;
     });
     return m;
   }, [rollup]);
+
+  // Distribution amounts per sub-item code from the API's distributionAmount field.
+  const distFromApi = useMemo(() => {
+    const m: Record<string, number> = {};
+    rollup.forEach(r => {
+      const amt = Number(r.distributionAmount || 0);
+      if (amt) m[r.code] = (m[r.code] || 0) + amt;
+    });
+    return m;
+  }, [rollup]);
+
+  // Index rollup items by code for name/category lookup.
+  const rollupByCode = useMemo(
+    () => Object.fromEntries(rollup.map(r => [r.code, r])),
+    [rollup],
+  );
 
   // Approved expenditure amounts grouped by linked AIE id (from /expenditures?status=APPROVED).
   // Try multiple field name variants the API may use.
@@ -176,23 +190,30 @@ export default function ExpendituresOverviewTab() {
   }, [approvedExpenditures]);
 
   const combinedRows = useMemo(() => {
-    const codes = new Set<string>([...Object.keys(distBySubItem), ...Object.keys(aieBySubItem)]);
+    const codes = new Set<string>([
+      ...Object.keys(distBySubItem),
+      ...Object.keys(distFromApi),
+      ...Object.keys(aieBySubItem),
+    ]);
     const rows = Array.from(codes).map(code => {
+      const api = rollupByCode[code];
       const sub = subByCode[code];
       const cat = sub ? catByCode[sub.category_code] : undefined;
+      const dist = distBySubItem[code] || distFromApi[code] || 0;
+      const aie = aieBySubItem[code] || 0;
       return {
         code,
-        name: sub?.name ?? "—",
-        category: cat?.name ?? sub?.category_code ?? "—",
-        aie: aieBySubItem[code] || 0,
-        dist: distBySubItem[code] || 0,
-        total: (aieBySubItem[code] || 0) + (distBySubItem[code] || 0),
+        name: api?.item || sub?.name || "—",
+        category: api?.category || cat?.name || sub?.category_code || "—",
+        aie,
+        dist,
+        total: aie + dist,
       };
     });
     rows.sort((a, b) => b.total - a.total);
     const q = search.trim().toLowerCase();
     return q ? rows.filter(r => r.code.toLowerCase().includes(q) || r.name.toLowerCase().includes(q) || r.category.toLowerCase().includes(q)) : rows;
-  }, [distBySubItem, aieBySubItem, subByCode, catByCode, search]);
+  }, [distBySubItem, distFromApi, aieBySubItem, rollupByCode, subByCode, catByCode, search]);
 
   const totals = useMemo(() => combinedRows.reduce(
     (t, r) => { t.aie += r.aie; t.dist += r.dist; t.total += r.total; return t; },
