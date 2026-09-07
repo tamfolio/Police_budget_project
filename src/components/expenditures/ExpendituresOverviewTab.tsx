@@ -53,6 +53,7 @@ export default function ExpendituresOverviewTab() {
   const [subs, setSubs] = useState<SubItem[]>([]);
   const [cats, setCats] = useState<Category[]>([]);
   const [rollup, setRollup] = useState<ExpenditureRollupItem[]>([]);
+  const [aieSummaryTotal, setAieSummaryTotal] = useState(0);
   const [approvedExpenditures, setApprovedExpenditures] = useState<ExpenditureRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -76,7 +77,7 @@ export default function ExpendituresOverviewTab() {
       const [apiAies, ref, rollupData, expData] = await Promise.all([
         listAies(),
         getBudgetCodeReference(),
-        getExpenditureRollup().catch(() => [] as ExpenditureRollupItem[]),
+        getExpenditureRollup().catch(() => ({ items: [] as ExpenditureRollupItem[], aieSummary: 0 })),
         listExpenditures({ status: "APPROVED" }).catch(() => [] as ExpenditureRecord[]),
       ]);
       setAies(apiAies.map(a => ({
@@ -105,7 +106,8 @@ export default function ExpendituresOverviewTab() {
         }))
       ));
       setCats(ref.categories.map(cat => ({ code: cat.code, name: cat.name })));
-      setRollup(rollupData);
+      setRollup(rollupData.items);
+      setAieSummaryTotal(rollupData.aieSummary);
       setApprovedExpenditures(expData);
       setLoading(false);
     })();
@@ -147,18 +149,28 @@ export default function ExpendituresOverviewTab() {
     return m;
   }, [periods, formationPeriods, schoolPeriods]);
 
-  // Approved expenditure net amounts aggregated by sub-item code (from /expenditures/rollup).
+  // Approved expenditure amounts aggregated by sub-item code (from /expenditures?view=sub-item).
+  // Try netAmount first, fall back to grossAmount or generic amount field.
   const aieBySubItem = useMemo(() => {
     const m: Record<string, number> = {};
-    rollup.forEach(r => { m[r.code] = (m[r.code] || 0) + (Number(r.netAmount) || 0); });
+    rollup.forEach(r => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const amt = Number(r.netAmount || r.grossAmount || (r as any).amount || (r as any).totalAmount || 0);
+      m[r.code] = (m[r.code] || 0) + amt;
+    });
     return m;
   }, [rollup]);
 
   // Approved expenditure amounts grouped by linked AIE id (from /expenditures?status=APPROVED).
+  // Try multiple field name variants the API may use.
   const expendByAieId = useMemo(() => {
     const m: Record<string, number> = {};
     approvedExpenditures.forEach(e => {
-      if (e.aieId) m[e.aieId] = (m[e.aieId] || 0) + (Number(e.netAmount) || 0);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const id = e.aieId ?? (e as any).aie_id ?? (e as any).aieRecordId;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const amt = Number(e.netAmount || e.grossAmount || (e as any).amount || (e as any).totalAmount || 0);
+      if (id) m[id] = (m[id] || 0) + amt;
     });
     return m;
   }, [approvedExpenditures]);
@@ -190,7 +202,7 @@ export default function ExpendituresOverviewTab() {
   // KPI tiles: Distribution is the live sum of all 3 sub-tabs (Zones +
   // Formation + Schools), with sub-total / grand-total rows excluded.
   const kpiDist = distBreakdown.total;
-  const kpiAie = rollup.reduce((sum, r) => sum + (Number(r.netAmount) || 0), 0);
+  const kpiAie = aieSummaryTotal;
   const kpiTotal = kpiDist + kpiAie;
   const goToSummary = () => navigate("/distributions?tab=summary");
 
