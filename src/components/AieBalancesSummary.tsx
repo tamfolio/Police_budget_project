@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { createAie, getAie, updateAie, deleteAie, type CreateAieLineItem } from "@/lib/aiesApi";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowUpDown, Plus, Upload, AlertTriangle, Lock, Eraser, Check, X } from "lucide-react";
 import { DIRECT_AIE_DISTRIBUTED_2026 } from "@/data/directAieDistributed2026";
@@ -52,6 +54,7 @@ export function AieBalancesSummary({
   availableYears: number[];
   onChanged?: () => void;
 }) {
+  const { user } = useAuth();
   const years = availableYears.length ? availableYears : [2026];
   const defaultYear = years.includes(2026) ? 2026 : years[years.length - 1];
   const [fy, setFy] = useState<number>(defaultYear);
@@ -191,13 +194,10 @@ export function AieBalancesSummary({
       for (const mi of monthList) {
         if (seed[mi] != null) {
           spentMap[mi] = Number(seed[mi]) || 0;
-        } else if (isAuthoritativeActualMonth(fy, mi)) {
-          spentMap[mi] = 0;
         } else if (ov[mi] != null) {
           spentMap[mi] = Number(ov[mi]) || 0;
-        } else if (total > 0) {
-          spentMap[mi] = +(distributed * ((monthsMap[mi] || 0) / total)).toFixed(2);
         } else {
+          // No actual data — always zero; never derive from budget figures
           spentMap[mi] = 0;
         }
       }
@@ -292,10 +292,9 @@ export function AieBalancesSummary({
     </th>
   );
 
-  // Save a monthly authority amount: find the aie_records row matching (fy, code, month) and update.
-  // If no matching row exists, insert a new DRAFT one (requires BUDGET_CLK).
-  const saveMonth = async (code: string, monthIdx: number, value: number, current: number) => {
-    if (value === current) return;
+  // Save a monthly authority amount. Returns true on success, false on failure (never throws).
+  const saveMonth = async (code: string, monthIdx: number, value: number, current: number): Promise<boolean> => {
+    if (value === current) return true;
     const cellKey = `${code}:${monthIdx}`;
     setSaving(cellKey);
     try {
@@ -305,48 +304,53 @@ export function AieBalancesSummary({
         new Date(r.issue_date).getMonth() === monthIdx
       );
       if (matches.length === 1) {
-        const { error } = await supabase.from("aie_records").update({ amount: value }).eq("id", matches[0].id);
-        if (error) throw error;
+        const aieId = matches[0].id.split(":")[0];
+        const lineId = matches[0].id.includes(":") ? matches[0].id.split(":")[1] : undefined;
+        const aie = await getAie(aieId);
+        const updatedLineItems: CreateAieLineItem[] = aie.lineItems.length === 0
+          ? [{ itemCodeId: "OTHER", subItemCodeId: code, budgetAmount: value }]
+          : aie.lineItems.map(l => {
+              const isTarget = lineId ? l.id === lineId : ((l as any).subItemCode ?? l.subItemCodeId) === code;
+              return { itemCodeId: l.itemCodeId, subItemCodeId: l.subItemCodeId, budgetAmount: isTarget ? value : Number(l.budgetAmount) };
+            });
+        await updateAie(aieId, { lineItems: updatedLineItems });
       } else if (matches.length === 0) {
-        if (value === 0) return;
-        const day = new Date(fy, monthIdx + 1, 0).getDate(); // last day of month
+        if (value === 0) return true;
+        // Create a new AIE record via the REST API (avoids Supabase session requirement)
+        if (!user) throw new Error("You must be signed in to add records. Please reload the page.");
+        const day = new Date(fy, monthIdx + 1, 0).getDate();
         const issueDate = `${fy}-${String(monthIdx + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
         const monthName = MONTH_LABELS[monthIdx].toUpperCase();
-        const { data: u } = await supabase.auth.getUser();
-        const uid = u.user?.id;
-        if (!uid) throw new Error("Not signed in");
-        const { error } = await supabase.from("aie_records").insert({
-          fiscal_year: fy,
-          aie_no: `NPF/${fy}/${code}/${monthName}`,
-          issue_date: issueDate,
-          sub_item_code: code,
-          amount: value,
-          recipient_unit: "naira",
-          created_by: uid,
+        await createAie({
+          fiscalYear: fy,
+          aieNo: `NPF/${fy}/${code}/${monthName}`,
+          issueDate,
+          recipientUnit: "naira",
+          lineItems: [{ itemCodeId: "OTHER", subItemCodeId: code, budgetAmount: value }],
         });
-        if (error) throw error;
       } else {
-        // Multiple rows: scale them proportionally to the new total (preserve relative weights).
+        // Multiple rows — scale proportionally to the new total
         const sum = matches.reduce((t, r) => t + Number(r.amount || 0), 0);
-        if (sum === 0) {
-          // Distribute evenly
-          const per = value / matches.length;
-          for (const r of matches) {
-            const { error } = await supabase.from("aie_records").update({ amount: per }).eq("id", r.id);
-            if (error) throw error;
-          }
-        } else {
-          for (const r of matches) {
-            const scaled = (Number(r.amount || 0) / sum) * value;
-            const { error } = await supabase.from("aie_records").update({ amount: scaled }).eq("id", r.id);
-            if (error) throw error;
-          }
+        for (const r of matches) {
+          const scaled = sum === 0 ? value / matches.length : (Number(r.amount || 0) / sum) * value;
+          const aieId = r.id.split(":")[0];
+          const lineId = r.id.includes(":") ? r.id.split(":")[1] : undefined;
+          const aie = await getAie(aieId);
+          const updatedLineItems: CreateAieLineItem[] = aie.lineItems.length === 0
+            ? [{ itemCodeId: "OTHER", subItemCodeId: code, budgetAmount: scaled }]
+            : aie.lineItems.map(l => {
+                const isTarget = lineId ? l.id === lineId : ((l as any).subItemCode ?? l.subItemCodeId) === code;
+                return { itemCodeId: l.itemCodeId, subItemCodeId: l.subItemCodeId, budgetAmount: isTarget ? scaled : Number(l.budgetAmount) };
+              });
+          await updateAie(aieId, { lineItems: updatedLineItems });
         }
       }
       toast.success(`Saved ${MONTH_LABELS[monthIdx]} ${fy} · ${code}`);
       onChanged?.();
+      return true;
     } catch (e: any) {
       toast.error(e?.message || "Failed to save.");
+      return false;
     } finally {
       setSaving(null);
     }
@@ -393,10 +397,24 @@ export function AieBalancesSummary({
         new Date(r.issue_date).getMonth() === monthIdx
       );
       if (targets.length === 0) { toast.message("Cell is already empty."); return; }
-      const ids = targets.map(t => t.id);
-      await supabase.from("aie_lines").delete().in("aie_id", ids);
-      const { error } = await supabase.from("aie_records").delete().in("id", ids);
-      if (error) throw error;
+      for (const target of targets) {
+        const aieId = target.id.split(":")[0];
+        const lineId = target.id.includes(":") ? target.id.split(":")[1] : undefined;
+        const aie = await getAie(aieId);
+        const remaining = aie.lineItems.filter(l =>
+          lineId ? l.id !== lineId : ((l as any).subItemCode ?? l.subItemCodeId) !== code
+        );
+        if (remaining.length === 0) {
+          await deleteAie(aieId);
+        } else {
+          const keepItems: CreateAieLineItem[] = remaining.map(l => ({
+            itemCodeId: l.itemCodeId,
+            subItemCodeId: l.subItemCodeId,
+            budgetAmount: Number(l.budgetAmount),
+          }));
+          await updateAie(aieId, { lineItems: keepItems });
+        }
+      }
       toast.success(`Cleared ${MONTH_LABELS[monthIdx]} ${fy} · ${code}`);
       onChanged?.();
     } catch (e: any) {
@@ -415,14 +433,25 @@ export function AieBalancesSummary({
     setSavingDraft(true);
     try {
       const entries = Object.entries(draftValues).filter(([, v]) => Number(v) > 0);
+      let failCount = 0;
       for (const [code, v] of entries) {
         // eslint-disable-next-line no-await-in-loop
-        await saveMonth(code, draftMonth, Number(v), 0);
+        const ok = await saveMonth(code, draftMonth, Number(v), 0);
+        if (!ok) failCount++;
       }
+      if (failCount > 0) {
+        // Errors already shown by saveMonth — keep the draft open so no data is lost
+        toast.warning(
+          `${failCount} of ${entries.length} entr${failCount === 1 ? "y" : "ies"} could not be saved. ` +
+          `Your values are still here — fix the errors above and click Save again.`
+        );
+        return;
+      }
+      // All saved — commit
       const next = Array.from(new Set([...extraMonths, draftMonth])).sort((a, b) => a - b);
       try { localStorage.setItem(extraMonthsKey(fy), JSON.stringify(next)); } catch {}
       setExtraMonths(next);
-      toast.success(`Saved ${entries.length} value(s) for ${MONTH_FULL[draftMonth]} ${fy}`);
+      toast.success(`Saved ${entries.length} value${entries.length === 1 ? "" : "s"} for ${MONTH_FULL[draftMonth]} ${fy}`);
       setDraftMonth(null);
       setDraftValues({});
     } finally {
@@ -533,7 +562,7 @@ export function AieBalancesSummary({
           <DialogHeader>
             <DialogTitle>Add Month · {fy}</DialogTitle>
             <DialogDescription>
-              Add a new monthly column. You can fill amounts inline afterwards, or upload a CSV now.
+              Choose a month to add as a new column. You can type amounts directly in the table, or upload a file to import them all at once.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -543,20 +572,22 @@ export function AieBalancesSummary({
                 <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {MONTH_FULL.map((m, i) => (
-                    <SelectItem key={i} value={String(i)}>{m} {fy}{months.includes(i) ? " (already exists)" : ""}</SelectItem>
+                    <SelectItem key={i} value={String(i)}>{m} {fy}{months.includes(i) ? " (already added)" : ""}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               {duplicate && (
                 <p className="text-[11px] text-amber-600 flex items-center gap-1">
-                  <AlertTriangle className="h-3 w-3" /> This month already exists. Confirming will keep the column and (if a CSV is provided) overwrite cell values.
+                  <AlertTriangle className="h-3 w-3" /> {MONTH_FULL[monthIdx]} {fy} is already shown. Select a different month.
                 </p>
               )}
             </div>
 
-            <div className="space-y-1">
-              <Label className="text-xs">Upload CSV/XLSX (optional)</Label>
-              <p className="text-[11px] text-muted-foreground">Two columns: <code>Code,Amount</code></p>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Import from file (optional)</Label>
+              <p className="text-[11px] text-muted-foreground">
+                Your file needs two columns — the first is the <strong>budget code</strong> (e.g. <code>0301(a)</code>), and the second is the <strong>amount in Naira</strong> (numbers only, no commas or ₦ symbol). Rows whose code is not in the table will be skipped.
+              </p>
               <input
                 type="file"
                 accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -571,20 +602,21 @@ export function AieBalancesSummary({
                 <div className="mt-2 rounded border border-border max-h-48 overflow-auto text-[11px]">
                   <table className="w-full">
                     <thead className="bg-muted/40">
-                      <tr><th className="p-1 text-left">Code</th><th className="p-1 text-right">Amount</th><th className="p-1">Status</th></tr>
+                      <tr><th className="p-1 text-left">Code</th><th className="p-1 text-right">Amount (₦)</th><th className="p-1">Status</th></tr>
                     </thead>
                     <tbody>
                        {csvRows.map((r, i) => (
                         <tr key={i} className={r.known ? "" : "bg-destructive/10"}>
                            <td className="p-1"><BudgetCode code={r.code} /></td>
                           <td className="p-1 text-right font-mono">{fmtMoney(r.amount)}</td>
-                          <td className="p-1 text-center">{r.known ? "OK" : "Unknown code"}</td>
+                          <td className="p-1 text-center text-[10.5px]">{r.known ? "✓ Ready" : "Not in table — will be skipped"}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
-                  <div className="p-1 text-muted-foreground">
-                    {csvRows.filter(r => r.known).length} matched · {csvRows.filter(r => !r.known).length} unknown (skipped)
+                  <div className="p-1.5 text-[10.5px] text-muted-foreground">
+                    {csvRows.filter(r => r.known).length} row{csvRows.filter(r => r.known).length === 1 ? "" : "s"} ready to import
+                    {csvRows.filter(r => !r.known).length > 0 && ` · ${csvRows.filter(r => !r.known).length} unrecognised (will be skipped)`}
                   </div>
                 </div>
               )}
@@ -593,7 +625,7 @@ export function AieBalancesSummary({
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddOpen(false)} disabled={busy}>Cancel</Button>
             {csvFile ? (
-              <Button onClick={confirm} disabled={busy}>
+              <Button onClick={confirm} disabled={busy || duplicate}>
                 <Upload className="h-3 w-3 mr-1" />Add & Import
               </Button>
             ) : (

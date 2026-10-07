@@ -4,7 +4,6 @@ import { Outlet } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { ROLE_LABEL } from "@/lib/roles";
 import npfLogo from "@/assets/npf-logo.png";
-import { PendingApprovalsBell } from "@/components/PendingApprovalsBell";
 import { NotificationsBell } from "@/components/NotificationsBell";
 import { Link } from "react-router-dom";
 import { UserCircle2, Search } from "lucide-react";
@@ -52,7 +51,6 @@ export function DashboardLayout() {
             <ThemeToggle />
             {user && (
               <div className="flex items-center gap-2">
-                <PendingApprovalsBell />
                 <NotificationsBell />
                 <Link
                   to="/settings/profile"

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   Check,
   Loader2,
@@ -93,10 +94,23 @@ const STATUS_VARIANT: Record<FundInflowStatus, "default" | "secondary" | "outlin
   REJECTED: "destructive",
 };
 
+const STATUS_LABEL: Record<FundInflowStatus, string> = {
+  DRAFT: "Draft",
+  PENDING_REVIEW: "Pending Review",
+  PENDING_APPROVAL: "Pending Approval",
+  APPROVED: "Approved",
+  REJECTED: "Rejected",
+};
+
 const fmtNGN = (n: number | string) =>
   new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN", maximumFractionDigits: 2 }).format(Number(n) || 0);
 
 export default function FundInflowsPage() {
+  const { hasRole } = useAuth();
+  const canCreate = hasRole("BUDGET_CLK") || hasRole("SYSADMIN");
+  const canReview  = hasRole("BUDGET_OFF") || hasRole("SYSADMIN");
+  const canApprove = hasRole("BUDGET_DIR") || hasRole("SYSADMIN");
+
   const [tab, setTab] = useState<Tab>("ALL");
   const [rows, setRows] = useState<FundInflow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -265,16 +279,11 @@ export default function FundInflowsPage() {
     }
   };
 
-  // The tab is purely a UI hint here: the server enforces the actual queue
-  // contents through /queue/review and /queue/approval. To keep this page
-  // self-contained we map tabs to status filters on the main list.
+  // Map each tab to its status filter. ALL always resets to show everything.
   useEffect(() => {
-    if (tab === "REVIEW") setStatusFilter("PENDING_REVIEW");
+    if (tab === "REVIEW")   setStatusFilter("PENDING_REVIEW");
     else if (tab === "APPROVAL") setStatusFilter("PENDING_APPROVAL");
-    else if (tab === "MINE" || tab === "ALL") {
-      // Leave the status filter intact when switching to ALL/MINE so the
-      // user can still drill in by status manually.
-    }
+    else setStatusFilter("ALL");
   }, [tab]);
 
   return (
@@ -295,10 +304,12 @@ export default function FundInflowsPage() {
             <RefreshCw className={`h-3.5 w-3.5 mr-1 ${loading ? "animate-spin" : ""}`} />
             Refresh
           </Button>
-          <Button type="button" size="sm" onClick={openCreate}>
-            <Plus className="h-3.5 w-3.5 mr-1" />
-            New inflow
-          </Button>
+          {canCreate && (
+            <Button type="button" size="sm" onClick={openCreate}>
+              <Plus className="h-3.5 w-3.5 mr-1" />
+              New inflow
+            </Button>
+          )}
         </div>
       </div>
 
@@ -330,8 +341,8 @@ export default function FundInflowsPage() {
         <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
           <TabsList>
             <TabsTrigger value="ALL">All</TabsTrigger>
-            <TabsTrigger value="REVIEW">Officer review</TabsTrigger>
-            <TabsTrigger value="APPROVAL">Director approval</TabsTrigger>
+            {canReview  && <TabsTrigger value="REVIEW">Pending Review</TabsTrigger>}
+            {canApprove && <TabsTrigger value="APPROVAL">Pending Approval</TabsTrigger>}
           </TabsList>
         </Tabs>
 
@@ -365,9 +376,7 @@ export default function FundInflowsPage() {
             <SelectContent>
               <SelectItem value="ALL">All statuses</SelectItem>
               {FUND_INFLOW_STATUSES.map(s => (
-                <SelectItem key={s} value={s}>
-                  {s}
-                </SelectItem>
+                <SelectItem key={s} value={s}>{STATUS_LABEL[s]}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -423,28 +432,23 @@ export default function FundInflowsPage() {
                 </div>
                 <div className="text-right font-semibold">{fmtNGN(r.amount)}</div>
                 <div>
-                  <Badge variant={STATUS_VARIANT[r.status]} className="text-[10.5px]">{r.status}</Badge>
+                  <Badge variant={STATUS_VARIANT[r.status]} className="text-[10.5px]">{STATUS_LABEL[r.status]}</Badge>
                 </div>
                 <div className="flex justify-end gap-1 flex-wrap">
-                  {r.status === "DRAFT" && (
+                  {r.status === "DRAFT" && canCreate && (
                     <>
-                      <Button type="button" size="sm" variant="ghost" className="h-7 px-2" onClick={() => openEdit(r)} title="Edit">
+                      <Button type="button" size="sm" variant="ghost" className="h-7 px-2" onClick={() => openEdit(r)} title="Edit draft">
                         <Pencil className="h-3.5 w-3.5" />
                       </Button>
                       <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 px-2"
+                        type="button" size="sm" variant="ghost" className="h-7 px-2"
                         title="Submit for review"
                         onClick={() => wrap("Submitted for review.", () => submitFundInflow(r.id))}
                       >
                         <Send className="h-3.5 w-3.5" />
                       </Button>
                       <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
+                        type="button" size="sm" variant="ghost"
                         className="h-7 px-2 text-destructive hover:text-destructive"
                         title="Delete draft"
                         onClick={() => remove(r)}
@@ -453,22 +457,17 @@ export default function FundInflowsPage() {
                       </Button>
                     </>
                   )}
-                  {r.status === "PENDING_REVIEW" && (
+                  {r.status === "PENDING_REVIEW" && canReview && (
                     <>
                       <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 px-2"
-                        title="Officer review"
-                        onClick={() => wrap("Reviewed.", () => reviewFundInflow(r.id))}
+                        type="button" size="sm" variant="ghost" className="h-7 px-2"
+                        title="Mark as reviewed — advances to Director approval"
+                        onClick={() => wrap("Marked as reviewed.", () => reviewFundInflow(r.id))}
                       >
                         <Check className="h-3.5 w-3.5" />
                       </Button>
                       <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
+                        type="button" size="sm" variant="ghost"
                         className="h-7 px-2 text-destructive hover:text-destructive"
                         title="Reject"
                         onClick={() => { setRejecting(r); setRejectReason(""); }}
@@ -477,22 +476,17 @@ export default function FundInflowsPage() {
                       </Button>
                     </>
                   )}
-                  {r.status === "PENDING_APPROVAL" && (
+                  {r.status === "PENDING_APPROVAL" && canApprove && (
                     <>
                       <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 px-2"
+                        type="button" size="sm" variant="ghost" className="h-7 px-2"
                         title="Approve"
                         onClick={() => wrap("Approved.", () => approveFundInflow(r.id))}
                       >
                         <Check className="h-3.5 w-3.5" />
                       </Button>
                       <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
+                        type="button" size="sm" variant="ghost"
                         className="h-7 px-2 text-destructive hover:text-destructive"
                         title="Reject"
                         onClick={() => { setRejecting(r); setRejectReason(""); }}
@@ -501,20 +495,26 @@ export default function FundInflowsPage() {
                       </Button>
                     </>
                   )}
-                  {r.status === "REJECTED" && (
+                  {r.status === "REJECTED" && canCreate && (
                     <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 px-2"
-                      title="Reopen"
-                      onClick={() => wrap("Reopened.", () => reopenFundInflow(r.id))}
+                      type="button" size="sm" variant="ghost" className="h-7 px-2"
+                      title="Reopen as draft"
+                      onClick={() => wrap("Reopened as draft.", () => reopenFundInflow(r.id))}
                     >
                       <RotateCcw className="h-3.5 w-3.5" />
                     </Button>
                   )}
                   {r.status === "APPROVED" && (
-                    <span className="text-[11px] text-muted-foreground italic px-2">approved</span>
+                    <span className="text-[11px] text-muted-foreground italic px-2">Approved</span>
+                  )}
+                  {/* Show a read-only indicator when the user has no action available */}
+                  {(
+                    (r.status === "DRAFT" && !canCreate) ||
+                    (r.status === "PENDING_REVIEW" && !canReview) ||
+                    (r.status === "PENDING_APPROVAL" && !canApprove) ||
+                    (r.status === "REJECTED" && !canCreate)
+                  ) && (
+                    <span className="text-[11px] text-muted-foreground italic px-2">—</span>
                   )}
                 </div>
               </li>
