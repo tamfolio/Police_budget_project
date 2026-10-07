@@ -4,6 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "security-check": "node scripts/security-check.js",
+    "predev": "node scripts/security-check.js",
+    "prebuild": "node scripts/security-check.js",
     "dev": "vite",
     "build": "vite build",
     "build:dev": "vite build --mode development",

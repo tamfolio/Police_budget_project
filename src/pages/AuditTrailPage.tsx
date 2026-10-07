@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -12,20 +10,12 @@ import { ShieldCheck, RefreshCcw, Loader2, ChevronLeft, ChevronRight, Eye } from
 import { toast } from "sonner";
 import { ApiError } from "@/lib/apiClient";
 import {
-  listHttpLogs, listAuditEntries,
-  type AuditHttpLog, type AuditEntry, type AuditHttpMethod,
+  listAuditEntries,
+  type AuditEntry,
 } from "@/lib/auditApi";
 
 const fmtDt = (iso: string) => {
   try { return new Date(iso).toLocaleString(); } catch { return iso; }
-};
-
-const STATUS_VARIANT = (code: number): "default" | "secondary" | "destructive" | "outline" => {
-  if (code >= 500) return "destructive";
-  if (code >= 400) return "destructive";
-  if (code >= 300) return "secondary";
-  if (code >= 200) return "default";
-  return "outline";
 };
 
 const ACTION_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
@@ -40,14 +30,12 @@ function apiErrorMessage(e: unknown, fallback: string) {
   return fallback;
 }
 
-const HTTP_METHODS: AuditHttpMethod[] = ["GET", "POST", "PUT", "PATCH", "DELETE"];
 const PAGE_SIZE = 50;
 
 export default function AuditTrailPage() {
   useEffect(() => { document.title = "Audit Trail – NPF BMS"; }, []);
   const { hasRole } = useAuth();
   const allowed = hasRole("AUDITOR") || hasRole("SYSADMIN") || hasRole("BUDGET_DIR");
-  const [tab, setTab] = useState<"http" | "activity">("http");
 
   if (!allowed) {
     return (
@@ -66,174 +54,11 @@ export default function AuditTrailPage() {
       <div>
         <h1 className="text-xl font-bold font-serif">Audit Trail</h1>
         <p className="text-[12px] text-muted-foreground mt-1">
-          HTTP requests and business activity recorded by the backend.
+          Business activity recorded by the backend.
         </p>
       </div>
-
-      <Tabs value={tab} onValueChange={(v) => setTab(v as "http" | "activity")} className="w-full">
-        <TabsList className="grid grid-cols-2 w-full max-w-md">
-          <TabsTrigger value="http">HTTP Requests</TabsTrigger>
-          <TabsTrigger value="activity">Activity Log</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="http" className="mt-4">
-          <HttpLogsTab />
-        </TabsContent>
-        <TabsContent value="activity" className="mt-4">
-          <ActivityTab />
-        </TabsContent>
-      </Tabs>
+      <ActivityTab />
     </div>
-  );
-}
-
-// ============================================================
-// HTTP Logs
-// ============================================================
-function HttpLogsTab() {
-  const [rows, setRows] = useState<AuditHttpLog[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
-  const [method, setMethod] = useState<string>("ALL");
-  const [endpoint, setEndpoint] = useState("");
-  const [statusCode, setStatusCode] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [detail, setDetail] = useState<AuditHttpLog | null>(null);
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const { logs } = await listHttpLogs({
-        method: method !== "ALL" ? (method as AuditHttpMethod) : undefined,
-        endpoint: endpoint.trim() || undefined,
-        statusCode: statusCode.trim() ? Number(statusCode) : undefined,
-        dateFrom: dateFrom || undefined,
-        dateTo: dateTo || undefined,
-        page,
-        limit: PAGE_SIZE,
-      });
-      setRows(logs);
-    } catch (e) {
-      toast.error(apiErrorMessage(e, "Failed to load HTTP logs."));
-      setRows([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [method, endpoint, statusCode, dateFrom, dateTo, page]);
-
-  useEffect(() => { refresh(); }, [refresh]);
-
-  const applyFilters = () => { setPage(1); refresh(); };
-
-  return (
-    <Card>
-      <CardContent className="p-4 space-y-3">
-        <div className="grid grid-cols-1 md:grid-cols-6 gap-2">
-          <div>
-            <Label className="text-[11px]">Method</Label>
-            <Select value={method} onValueChange={(v) => { setMethod(v); setPage(1); }}>
-              <SelectTrigger className="h-8 text-[12px]"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">All</SelectItem>
-                {HTTP_METHODS.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="md:col-span-2">
-            <Label className="text-[11px]">Endpoint contains</Label>
-            <Input className="h-8 text-[12px]" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="/expenditures" />
-          </div>
-          <div>
-            <Label className="text-[11px]">Status code</Label>
-            <Input className="h-8 text-[12px]" value={statusCode} inputMode="numeric" onChange={(e) => setStatusCode(e.target.value)} placeholder="200" />
-          </div>
-          <div>
-            <Label className="text-[11px]">From</Label>
-            <Input type="date" className="h-8 text-[12px]" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-          </div>
-          <div>
-            <Label className="text-[11px]">To</Label>
-            <Input type="date" className="h-8 text-[12px]" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button size="sm" type="button" onClick={applyFilters} disabled={loading}>
-            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCcw className="h-3.5 w-3.5" />} Apply
-          </Button>
-          <div className="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground">
-            <Button size="sm" variant="ghost" type="button" disabled={page <= 1 || loading} onClick={() => setPage(p => Math.max(1, p - 1))}>
-              <ChevronLeft className="h-3.5 w-3.5" />
-            </Button>
-            <span>Page {page}</span>
-            <Button size="sm" variant="ghost" type="button" disabled={rows.length < PAGE_SIZE || loading} onClick={() => setPage(p => p + 1)}>
-              <ChevronRight className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-        </div>
-
-        <div className="rounded border border-border overflow-x-auto">
-          <table className="w-full text-[12px]">
-            <thead className="bg-muted/50 text-[11px] uppercase tracking-wide text-muted-foreground">
-              <tr>
-                <th className="text-left px-2 py-1.5">When</th>
-                <th className="text-left px-2 py-1.5">Method</th>
-                <th className="text-left px-2 py-1.5">Endpoint</th>
-                <th className="text-right px-2 py-1.5">Status</th>
-                <th className="text-right px-2 py-1.5">Duration</th>
-                <th className="text-left px-2 py-1.5">User</th>
-                <th className="text-left px-2 py-1.5">IP</th>
-                <th className="px-2 py-1.5" />
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr><td colSpan={8} className="px-2 py-6 text-center text-muted-foreground">Loading…</td></tr>
-              ) : rows.length === 0 ? (
-                <tr><td colSpan={8} className="px-2 py-6 text-center text-muted-foreground">No HTTP logs match the filters.</td></tr>
-              ) : rows.map(r => (
-                <tr key={r.id} className="border-t border-border/60 hover:bg-muted/30">
-                  <td className="px-2 py-1.5 whitespace-nowrap">{fmtDt(r.createdAt)}</td>
-                  <td className="px-2 py-1.5"><Badge variant="outline" className="text-[10px]">{r.method}</Badge></td>
-                  <td className="px-2 py-1.5 font-mono text-[11px]">{r.endpoint}</td>
-                  <td className="px-2 py-1.5 text-right"><Badge variant={STATUS_VARIANT(r.statusCode)} className="text-[10px]">{r.statusCode}</Badge></td>
-                  <td className="px-2 py-1.5 text-right tabular-nums">{r.durationMs ?? "—"} ms</td>
-                  <td className="px-2 py-1.5">{r.user?.fullName || r.user?.email || (r.user?.id ? r.user.id.slice(0, 8) : "—")}</td>
-                  <td className="px-2 py-1.5 font-mono text-[10px]">{r.ipAddress ?? "—"}</td>
-                  <td className="px-2 py-1.5 text-right">
-                    <Button size="sm" variant="ghost" type="button" onClick={() => setDetail(r)}>
-                      <Eye className="h-3.5 w-3.5" />
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </CardContent>
-
-      <Dialog open={!!detail} onOpenChange={(o) => !o && setDetail(null)}>
-        <DialogContent className="max-w-xl">
-          <DialogHeader><DialogTitle>HTTP Request</DialogTitle></DialogHeader>
-          {detail && (
-            <div className="space-y-2 text-[12px]">
-              <div className="grid grid-cols-2 gap-2">
-                <div><span className="text-muted-foreground">When:</span> {fmtDt(detail.createdAt)}</div>
-                <div><span className="text-muted-foreground">Status:</span> {detail.statusCode}</div>
-                <div><span className="text-muted-foreground">Method:</span> {detail.method}</div>
-                <div><span className="text-muted-foreground">Duration:</span> {detail.durationMs ?? "—"} ms</div>
-                <div className="col-span-2"><span className="text-muted-foreground">Endpoint:</span> <span className="font-mono text-[11px]">{detail.endpoint}</span></div>
-                <div className="col-span-2"><span className="text-muted-foreground">User:</span> {detail.user?.fullName || detail.user?.email || detail.user?.id || "—"}</div>
-                <div className="col-span-2"><span className="text-muted-foreground">IP:</span> {detail.ipAddress ?? "—"}</div>
-                {detail.userAgent && (
-                  <div className="col-span-2"><span className="text-muted-foreground">User-Agent:</span> <span className="font-mono text-[10px] break-all">{detail.userAgent}</span></div>
-                )}
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-    </Card>
   );
 }
 

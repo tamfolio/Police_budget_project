@@ -2,7 +2,7 @@ import {
   LayoutDashboard, Banknote, FileSignature, Layers, Receipt,
   ClipboardList, BarChart3, ShieldCheck, Users, LogOut, BookOpen, UserPlus,
   GitCompare,
-  Database, Building2, Shield, KeyRound,
+  Building2, Shield, KeyRound,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -30,7 +30,6 @@ const navItems = [
   { title: "Roles", url: "/admin/roles", icon: Shield },
   { title: "Permissions", url: "/admin/permissions", icon: KeyRound },
   { title: "Invite Users", url: "/admin/invite", icon: UserPlus },
-  { title: "Repository", url: "/admin/backup", icon: Database },
 ];
 
 export function AppSidebar() {

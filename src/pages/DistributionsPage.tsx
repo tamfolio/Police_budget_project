@@ -35,6 +35,7 @@ import {
   type DistributionSimplePeriod,
   type DistributionSummaryPeriod,
   type DistributionView,
+  type DistributionZoneGroups,
   type DistributionZonePeriod,
 } from "@/lib/distributionsApi";
 
@@ -581,7 +582,7 @@ function SummaryViewTable({ period }: { period: DistributionSummaryPeriod }) {
   );
 }
 
-// ─── Period editor dialog (JSON-based) ────────────────────────────────────────
+// ─── Period editor dialog (structured form) ───────────────────────────────────
 function PeriodEditorDialog({
   open, onClose, mode, view, initial, onSave,
 }: {
@@ -594,55 +595,148 @@ function PeriodEditorDialog({
 }) {
   const [id, setId] = useState(initial.id);
   const [label, setLabel] = useState(initial.label);
-  const [json, setJson] = useState(() => JSON.stringify(initial, null, 2));
+  const [payload, setPayload] = useState<DistributionPayload>(() => JSON.parse(JSON.stringify(initial)));
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     setId(initial.id);
     setLabel(initial.label);
-    setJson(JSON.stringify(initial, null, 2));
-  }, [initial]);
+    const clone: DistributionPayload = JSON.parse(JSON.stringify(initial));
+    if (view !== "summary") {
+      const p = clone as DistributionZonePeriod | DistributionSimplePeriod;
+      const cols = p.columns ?? [];
+      p.columns = [cols[0] ?? "", cols[1] ?? ""];
+    }
+    setPayload(clone);
+  }, [initial, view]);
 
   const submit = async () => {
-    let parsed: DistributionPayload;
-    try { parsed = JSON.parse(json); }
-    catch (e) { toast.error(`Invalid JSON: ${(e as Error).message}`); return; }
     if (!id.trim() || !label.trim()) { toast.error("Period id and label are required."); return; }
-    parsed.id = id.trim();
-    parsed.label = label.trim();
+    if (view !== "summary") {
+      const cols = (payload as DistributionZonePeriod | DistributionSimplePeriod).columns ?? [];
+      if (cols.length !== 2 || !cols[0].trim() || !cols[1].trim()) {
+        toast.error("Distributions are bi-monthly — exactly 2 non-empty column headers are required.");
+        return;
+      }
+    }
+    const final = { ...payload, id: id.trim(), label: label.trim() } as DistributionPayload;
     setBusy(true);
-    try { await onSave(parsed); } finally { setBusy(false); }
+    try { await onSave(final); } finally { setBusy(false); }
   };
+
+  const setColumns = (cols: string[]) =>
+    setPayload(p => ({ ...p, columns: cols } as DistributionPayload));
+
+  const updateZoneAmount = (group: keyof DistributionZoneGroups, fIdx: number, iIdx: number, colIdx: number, val: number) =>
+    setPayload(prev => {
+      const p: DistributionZonePeriod = JSON.parse(JSON.stringify(prev));
+      p.data[group][fIdx].items[iIdx].amounts[colIdx] = val;
+      p.data[group][fIdx].totals = p.data[group][fIdx].items.reduce((acc, it) => {
+        it.amounts.forEach((a, ci) => { acc[ci] = (acc[ci] || 0) + (Number(a) || 0); });
+        return acc;
+      }, [] as number[]);
+      return p;
+    });
+
+  const updateZoneProvision = (group: keyof DistributionZoneGroups, fIdx: number, val: number) =>
+    setPayload(prev => {
+      const p: DistributionZonePeriod = JSON.parse(JSON.stringify(prev));
+      p.data[group][fIdx].provision = val;
+      return p;
+    });
+
+  const updateSimpleAmount = (sIdx: number, iIdx: number, colIdx: number, val: number) =>
+    setPayload(prev => {
+      const p: DistributionSimplePeriod = JSON.parse(JSON.stringify(prev));
+      p.sections[sIdx].items[iIdx].amounts[colIdx] = val;
+      return p;
+    });
+
+  const updateSimpleProvision = (sIdx: number, colIdx: number, val: number) =>
+    setPayload(prev => {
+      const p: DistributionSimplePeriod = JSON.parse(JSON.stringify(prev));
+      if (!p.sections[sIdx].provisions) p.sections[sIdx].provisions = [];
+      p.sections[sIdx].provisions[colIdx] = val;
+      return p;
+    });
+
+  const updateSummaryRow = (rIdx: number, field: "allocation" | "fromDist", val: number) =>
+    setPayload(prev => {
+      const p: DistributionSummaryPeriod = JSON.parse(JSON.stringify(prev));
+      p.rows[rIdx][field] = val;
+      return p;
+    });
+
+  const columns = (payload as DistributionZonePeriod | DistributionSimplePeriod).columns ?? [];
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+      <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle>{mode === "create" ? "Add" : "Edit"} {view} period</DialogTitle>
-          <DialogDescription>
-            Edit the period payload. The schema matches the {view} view exactly — keep the field structure intact.
-          </DialogDescription>
         </DialogHeader>
-        <div className="grid grid-cols-2 gap-3">
+
+        <div className="grid grid-cols-2 gap-3 shrink-0">
           <div>
-            <Label className="text-[11px]">Period id</Label>
-            <Input value={id} onChange={e => setId(e.target.value)} placeholder="e.g. 2026-q1" className="h-9 mt-1" disabled={mode === "edit"} />
+            <Label className="text-[11px]">Period ID</Label>
+            <Input value={id} onChange={e => setId(e.target.value)} placeholder="e.g. 2026-01" className="h-9 mt-1" disabled={mode === "edit"} />
           </div>
           <div>
             <Label className="text-[11px]">Period label</Label>
-            <Input value={label} onChange={e => setLabel(e.target.value)} placeholder="e.g. 2026 Q1" className="h-9 mt-1" />
+            <Input value={label} onChange={e => setLabel(e.target.value)} placeholder="e.g. Jan–Feb 2026" className="h-9 mt-1" />
           </div>
         </div>
-        <div className="flex-1 overflow-hidden mt-2 flex flex-col">
-          <Label className="text-[11px]">Payload JSON</Label>
-          <Textarea
-            value={json}
-            onChange={e => setJson(e.target.value)}
-            className="font-mono text-[11.5px] flex-1 min-h-[300px] mt-1"
-            spellCheck={false}
-          />
+
+        {view !== "summary" && (
+          <div className="shrink-0">
+            <div className="flex items-center gap-2 mb-1">
+              <Label className="text-[11px]">Column headers</Label>
+              <span className="text-[10px] text-muted-foreground">(bi-monthly — 2 months required)</span>
+            </div>
+            <div className="flex gap-2">
+              {[0, 1].map(ci => (
+                <div key={ci} className="flex flex-col gap-1">
+                  <span className="text-[10px] text-muted-foreground">Month {ci + 1}</span>
+                  <Input
+                    value={columns[ci] ?? ""}
+                    onChange={e => {
+                      const cols: string[] = [columns[0] ?? "", columns[1] ?? ""];
+                      cols[ci] = e.target.value;
+                      setColumns(cols);
+                    }}
+                    placeholder={ci === 0 ? "e.g. January" : "e.g. February"}
+                    className="h-8 text-[12px] w-44"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="flex-1 overflow-y-auto mt-1 pr-1 space-y-1">
+          {view === "zone" && (
+            <ZoneFormEditor
+              period={payload as DistributionZonePeriod}
+              onAmountChange={updateZoneAmount}
+              onProvisionChange={updateZoneProvision}
+            />
+          )}
+          {(view === "formations" || view === "schools") && (
+            <SimpleFormEditor
+              period={payload as DistributionSimplePeriod}
+              onAmountChange={updateSimpleAmount}
+              onProvisionChange={updateSimpleProvision}
+            />
+          )}
+          {view === "summary" && (
+            <SummaryFormEditor
+              period={payload as DistributionSummaryPeriod}
+              onRowChange={updateSummaryRow}
+            />
+          )}
         </div>
-        <DialogFooter>
+
+        <DialogFooter className="shrink-0">
           <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
           <Button onClick={submit} disabled={busy}>
             {busy && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
@@ -651,6 +745,212 @@ function PeriodEditorDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ─── Zone form editor ─────────────────────────────────────────────────────────
+function ZoneFormEditor({
+  period, onAmountChange, onProvisionChange,
+}: {
+  period: DistributionZonePeriod;
+  onAmountChange: (group: keyof DistributionZoneGroups, fIdx: number, iIdx: number, colIdx: number, val: number) => void;
+  onProvisionChange: (group: keyof DistributionZoneGroups, fIdx: number, val: number) => void;
+}) {
+  const groups: { key: keyof DistributionZoneGroups; label: string }[] = [
+    { key: "zone1_6", label: "Zones 1–6" },
+    { key: "zone7_12", label: "Zones 7–12" },
+    { key: "zone13_17", label: "Zones 13–17" },
+  ];
+  return (
+    <div className="space-y-5">
+      {groups.map(g => {
+        const formations = period.data?.[g.key] ?? [];
+        return (
+          <div key={g.key}>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">{g.label}</p>
+            <div className="space-y-3">
+              {formations.map((f, fIdx) => (
+                <div key={fIdx} className="rounded-md border border-border">
+                  <div className="flex flex-wrap items-center gap-3 px-3 py-2 bg-muted/40 border-b border-border">
+                    <span className="text-[13px] font-semibold flex-1 uppercase tracking-wide">{f.name}</span>
+                    <div className="flex items-center gap-2">
+                      <Label className="text-[11px] text-muted-foreground">Provision</Label>
+                      <Input
+                        type="number"
+                        value={f.provision ?? 0}
+                        onChange={e => onProvisionChange(g.key, fIdx, Number(e.target.value))}
+                        className="h-7 w-40 text-[12px] text-right tabular-nums"
+                      />
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-[12px]">
+                      <thead className="bg-muted/20">
+                        <tr>
+                          <th className="px-2 py-1 text-left w-12 text-[11px]">S/No.</th>
+                          <th className="px-2 py-1 text-left min-w-[200px] text-[11px]">Item of Expenditure</th>
+                          <th className="px-2 py-1 text-left w-24 text-[11px]">Code</th>
+                          {period.columns.map((c, ci) => (
+                            <th key={ci} className="px-2 py-1 text-right w-40 text-[11px]">{c}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {f.items.map((it, iIdx) => (
+                          <tr key={iIdx} className="border-t border-border">
+                            <td className="px-2 py-1 text-muted-foreground">{it.sno ?? ""}</td>
+                            <td className="px-2 py-1">{it.desc}</td>
+                            <td className="px-2 py-1"><BudgetCode code={it.code} /></td>
+                            {period.columns.map((_, ci) => (
+                              <td key={ci} className="px-2 py-1">
+                                <Input
+                                  type="number"
+                                  value={it.amounts?.[ci] ?? 0}
+                                  onChange={e => onAmountChange(g.key, fIdx, iIdx, ci, Number(e.target.value))}
+                                  className="h-7 text-[12px] text-right tabular-nums w-full"
+                                />
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                        <tr className="border-t border-border bg-muted/20 font-semibold">
+                          <td className="px-2 py-1" colSpan={3}>Total</td>
+                          {(f.totals ?? []).map((t, ci) => (
+                            <td key={ci} className="px-2 py-1 text-right tabular-nums">{fmtN(t)}</td>
+                          ))}
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+              {formations.length === 0 && <p className="text-[12px] text-muted-foreground">No formations in this group.</p>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Simple form editor (formations / schools) ────────────────────────────────
+function SimpleFormEditor({
+  period, onAmountChange, onProvisionChange,
+}: {
+  period: DistributionSimplePeriod;
+  onAmountChange: (sIdx: number, iIdx: number, colIdx: number, val: number) => void;
+  onProvisionChange: (sIdx: number, colIdx: number, val: number) => void;
+}) {
+  return (
+    <div className="space-y-4">
+      {(period.sections ?? []).map((s, sIdx) => (
+        <div key={sIdx} className="rounded-md border border-border">
+          <div className="flex flex-wrap items-center gap-3 px-3 py-2 bg-muted/40 border-b border-border">
+            <span className="text-[13px] font-semibold flex-1 uppercase tracking-wide">{s.name}</span>
+            {period.columns.map((c, ci) => (
+              <div key={ci} className="flex items-center gap-2">
+                <Label className="text-[11px] text-muted-foreground whitespace-nowrap">
+                  Provision{period.columns.length > 1 ? ` (${c})` : ""}
+                </Label>
+                <Input
+                  type="number"
+                  value={s.provisions?.[ci] ?? 0}
+                  onChange={e => onProvisionChange(sIdx, ci, Number(e.target.value))}
+                  className="h-7 w-40 text-[12px] text-right tabular-nums"
+                />
+              </div>
+            ))}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[12px]">
+              <thead className="bg-muted/20">
+                <tr>
+                  <th className="px-2 py-1 text-left w-12 text-[11px]">S/No.</th>
+                  <th className="px-2 py-1 text-left min-w-[200px] text-[11px]">Items of Expenditure</th>
+                  <th className="px-2 py-1 text-left w-24 text-[11px]">Code</th>
+                  {period.columns.map((c, ci) => (
+                    <th key={ci} className="px-2 py-1 text-right w-40 text-[11px]">{c}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {s.items.map((it, iIdx) => (
+                  <tr key={iIdx} className="border-t border-border">
+                    <td className="px-2 py-1 text-muted-foreground">{it.sno ?? ""}</td>
+                    <td className="px-2 py-1">{it.desc}</td>
+                    <td className="px-2 py-1"><BudgetCode code={it.code} /></td>
+                    {period.columns.map((_, ci) => (
+                      <td key={ci} className="px-2 py-1">
+                        <Input
+                          type="number"
+                          value={it.amounts?.[ci] ?? 0}
+                          onChange={e => onAmountChange(sIdx, iIdx, ci, Number(e.target.value))}
+                          className="h-7 text-[12px] text-right tabular-nums w-full"
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ))}
+      {(period.sections ?? []).length === 0 && (
+        <p className="text-[12px] text-muted-foreground">No sections found in template.</p>
+      )}
+    </div>
+  );
+}
+
+// ─── Summary form editor ──────────────────────────────────────────────────────
+function SummaryFormEditor({
+  period, onRowChange,
+}: {
+  period: DistributionSummaryPeriod;
+  onRowChange: (rIdx: number, field: "allocation" | "fromDist", val: number) => void;
+}) {
+  const rows = period.rows ?? [];
+  return (
+    <div className="rounded-md border border-border overflow-x-auto">
+      <table className="w-full text-[12px]">
+        <thead className="bg-muted/40">
+          <tr>
+            <th className="px-3 py-2 text-left w-12 text-[11px]">S/No.</th>
+            <th className="px-3 py-2 text-left min-w-[220px] text-[11px]">Commands/Formations</th>
+            <th className="px-3 py-2 text-right w-48 text-[11px]">Allocation (₦)</th>
+            <th className="px-3 py-2 text-right w-48 text-[11px]">From Distribution (₦)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, rIdx) => (
+            <tr key={rIdx} className="border-t border-border">
+              <td className="px-3 py-1 text-muted-foreground">{rIdx + 1}</td>
+              <td className="px-3 py-1">{r.name}</td>
+              <td className="px-3 py-1">
+                <Input
+                  type="number"
+                  value={r.allocation ?? 0}
+                  onChange={e => onRowChange(rIdx, "allocation", Number(e.target.value))}
+                  className="h-7 text-[12px] text-right tabular-nums w-full"
+                />
+              </td>
+              <td className="px-3 py-1">
+                <Input
+                  type="number"
+                  value={r.fromDist ?? 0}
+                  onChange={e => onRowChange(rIdx, "fromDist", Number(e.target.value))}
+                  className="h-7 text-[12px] text-right tabular-nums w-full"
+                />
+              </td>
+            </tr>
+          ))}
+          {rows.length === 0 && (
+            <tr><td colSpan={4} className="px-3 py-4 text-center text-muted-foreground">No rows found in template.</td></tr>
+          )}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
