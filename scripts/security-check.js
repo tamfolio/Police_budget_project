@@ -28,6 +28,20 @@ const DANGER_PATTERNS = [
   { re: /global\s*\[\s*_\$_/,                 label: 'obfuscated global variable assignment' },
   { re: /global\s*\[[^\]]*\]\s*=\s*require/,  label: 'global require hijack' },
   { re: /global\s*\[[^\]]*\]\s*=\s*module/,   label: 'global module hijack' },
+  { re: /global\s*\[['"][^'"]{1,4}['"]\]\s*=/, label: 'suspicious short-key global assignment (malware signature)' },
+  { re: /createRequire\s*\(\s*import\.meta\.url\s*\)/, label: 'createRequire(import.meta.url) in non-build context — malware pattern' },
+  { re: /RvJq_qacMrKUHEOocOXlFJqDe|GE\$TYvOXPng_M|F\$FsRLfhVq_nVmBU/, label: 'known malware function signature detected' },
+];
+
+// ── Root-level JS files that must not exist ───────────────────────────────────
+// Legitimate root JS files are named *.config.js — anything else is suspicious.
+const FORBIDDEN_ROOT_FILES = ['api.js'];
+
+// ── .gitignore entries that are suspicious ────────────────────────────────────
+const GITIGNORE_SUSPICIOUS = [
+  /\.bat$/i,
+  /temp_/i,
+  /branch_structure/i,
 ];
 
 // ── Config files that must stay small (bytes) ─────────────────────────────────
@@ -66,6 +80,22 @@ function walk(dir, result = []) {
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 
+// Check package.json scripts for injected node calls
+try {
+  const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  const ALLOWED_NODE_SCRIPTS = ['scripts/security-check.js'];
+  for (const [scriptName, scriptCmd] of Object.entries(pkg.scripts || {})) {
+    const nodeMatches = [...(scriptCmd.matchAll(/node\s+([\w./-]+\.js)/g))];
+    for (const m of nodeMatches) {
+      if (!ALLOWED_NODE_SCRIPTS.some(a => m[1].endsWith(a.replace(/\//g, '/')))) {
+        flag(join(root, 'package.json'), null,
+          `package.json script "${scriptName}" runs "node ${m[1]}" — only scripts/security-check.js is expected. Verify this is intentional.`
+        );
+      }
+    }
+  }
+} catch { /* ignore parse errors */ }
+
 // Config files in the root
 const configFiles = readdirSync(root)
   .filter(f => /\.config\.(js|ts|mjs|cjs)$/.test(f))
@@ -78,6 +108,33 @@ const allFiles = [...configFiles, ...sourceFiles];
 
 // ── Scan ──────────────────────────────────────────────────────────────────────
 const issues = [];
+
+// Block forbidden root-level files
+for (const name of FORBIDDEN_ROOT_FILES) {
+  try {
+    statSync(join(root, name));
+    flag(join(root, name), null,
+      `${name} must not exist in the project root — this file is a known malware payload. Delete it.`
+    );
+  } catch { /* file doesn't exist — good */ }
+}
+
+// Check .gitignore for suspicious entries
+try {
+  const gitignore = readFileSync(join(root, '.gitignore'), 'utf8');
+  const lines = gitignore.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line || line.startsWith('#')) continue;
+    for (const pattern of GITIGNORE_SUSPICIOUS) {
+      if (pattern.test(line)) {
+        flag(join(root, '.gitignore'), i + 1,
+          `Suspicious .gitignore entry "${line}" — attackers add entries to hide their scripts.`
+        );
+      }
+    }
+  }
+} catch { /* .gitignore missing is fine */ }
 
 function flag(file, lineNum, msg) {
   issues.push({ file: file.replace(root, '').replace(/^[\\/]/, ''), lineNum, msg });
