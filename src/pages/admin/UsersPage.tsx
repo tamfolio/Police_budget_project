@@ -15,7 +15,7 @@ import {
 import {
   listAdminUsers, inviteUsers, deactivateUser, type AdminUser,
 } from "@/lib/usersApi";
-import { listRoles, type ApiRoleSummary } from "@/lib/rolesApi";
+import { listRoles, assignRole, type ApiRoleSummary } from "@/lib/rolesApi";
 import { ApiError } from "@/lib/apiClient";
 
 type AppRole = string;
@@ -55,6 +55,8 @@ export default function AdminUsersPage() {
 
   // Toggling active state per user
   const [toggling, setToggling] = useState<string | null>(null);
+  // Role reassignment per user
+  const [reassigning, setReassigning] = useState<string | null>(null);
 
   useEffect(() => { document.title = "User Administration – NPF BMS"; }, []);
 
@@ -96,7 +98,7 @@ export default function AdminUsersPage() {
     }
     setInviting(true);
     try {
-      await inviteUsers({ email: inviteEmail.trim(), fullName: inviteFullName.trim(), roleId: inviteRoleId });
+      await inviteUsers([{ email: inviteEmail.trim(), fullName: inviteFullName.trim(), roleId: inviteRoleId }]);
       toast.success(`Invitation sent to ${inviteEmail.trim()}.`);
       setInviteEmail("");
       setInviteFullName("");
@@ -105,6 +107,20 @@ export default function AdminUsersPage() {
       toast.error(e instanceof ApiError ? e.message : "Invite failed.");
     } finally {
       setInviting(false);
+    }
+  };
+
+  const handleAssignRole = async (u: AdminUser, roleId: string) => {
+    if (roleId === u.role?.id) return;
+    setReassigning(u.id);
+    try {
+      await assignRole(roleId, u.id);
+      toast.success(`Role updated for ${u.fullName || u.email}.`);
+      refresh();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "Failed to change role.");
+    } finally {
+      setReassigning(null);
     }
   };
 
@@ -252,14 +268,24 @@ export default function AdminUsersPage() {
                     <div className="text-[11px] text-muted-foreground">{u.fullName || "—"}</div>
                   </td>
                   <td className="p-2">
-                    {u.role ? (
-                      <Badge variant="secondary" className="text-[11px]">
-                        <Shield className="h-3 w-3 mr-1" />
-                        {ROLE_LABEL[u.role.code as keyof typeof ROLE_LABEL] ?? u.role.name}
-                      </Badge>
-                    ) : (
-                      <span className="text-[11px] text-muted-foreground">No role</span>
-                    )}
+                    <Select
+                      value={u.role?.id ?? ""}
+                      onValueChange={roleId => handleAssignRole(u, roleId)}
+                      disabled={reassigning === u.id || !u.isActive}
+                    >
+                      <SelectTrigger className="h-7 text-[11px] w-[160px]">
+                        {reassigning === u.id
+                          ? <Loader2 className="h-3 w-3 animate-spin" />
+                          : <><Shield className="h-3 w-3 mr-1 text-muted-foreground" /><SelectValue placeholder="No role" /></>}
+                      </SelectTrigger>
+                      <SelectContent>
+                        {roles.map(r => (
+                          <SelectItem key={r.id} value={r.id} className="text-[12px]">
+                            {ROLE_LABEL[r.code as keyof typeof ROLE_LABEL] ?? r.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </td>
                   <td className="p-2">
                     {u.isActive
@@ -292,7 +318,7 @@ export default function AdminUsersPage() {
 
       <p className="text-[11px] text-muted-foreground">
         <span className="font-semibold">Deactivate</span> blocks sign-in but preserves all history.
-        To re-activate a deactivated user or change their role, send a new invite with the correct role.
+        Use the role dropdown to reassign a user's role at any time.
       </p>
     </div>
   );

@@ -63,6 +63,14 @@ export async function deleteRole(id: string) {
   return apiFetch<unknown>(`/roles/${id}`, { method: "DELETE" });
 }
 
+/** POST /roles/{roleId}/assign — assign a role to an existing user. */
+export async function assignRole(roleId: string, userId: string) {
+  return apiFetch<unknown>(`/roles/${encodeURIComponent(roleId)}/assign`, {
+    method: "POST",
+    body: { userId },
+  });
+}
+
 /** Best-effort permissions list. The /roles/permissions endpoint follows the same
  *  pagination shape as /roles. Returns an empty array if the endpoint is
  *  unavailable so the UI can still render. */
