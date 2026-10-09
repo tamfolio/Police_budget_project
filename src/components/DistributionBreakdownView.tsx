@@ -418,15 +418,40 @@ function AddPeriodDialog({
             <Input value={label} onChange={e => setLabel(e.target.value)} placeholder="e.g. May–Jun 2026" className="h-9 mt-1" />
           </div>
         </div>
-        <div className="flex items-center gap-2 mt-2">
+        <div className="flex items-center gap-2 mt-2 flex-wrap">
           <label className="inline-flex items-center gap-2 text-[12px] cursor-pointer">
             <span className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1">
               <Upload className="h-3.5 w-3.5" /> Upload CSV/XLSX
             </span>
             <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleCsv(f); }} />
           </label>
+          <button
+            type="button"
+            className="text-[11px] text-primary underline"
+            onClick={() => {
+              const csv = [
+                "Formation Name,Item of Expenditure,Code,Amount",
+                "FORCE HQ ANNEX LAGOS FORMATIONS (c/o O/C PAY FHQ ANNEX LAGOS),PROVISION,,15287000",
+                "FORCE HQ ANNEX LAGOS FORMATIONS (c/o O/C PAY FHQ ANNEX LAGOS),S/No,,S/No. 43(a)",
+                "FORCE HQ ANNEX LAGOS FORMATIONS (c/o O/C PAY FHQ ANNEX LAGOS),(a) Touring Allowance - 2 PMF,0102,20000",
+                "FORCE HQ ANNEX LAGOS FORMATIONS (c/o O/C PAY FHQ ANNEX LAGOS),Electricity Charges,0201,500000",
+                "FORCE HQ ANNEX LAGOS FORMATIONS (c/o O/C PAY FHQ ANNEX LAGOS),Stationery - IGP's Sec,0301(a),100000",
+                "FORCE HQ ANNEX LAGOS FORMATIONS (c/o O/C PAY FHQ ANNEX LAGOS),Motor Vehicle Fuel Cost,0801,200000",
+                "FORCE CID ANNEX LAGOS,PROVISION,,4800000",
+                "FORCE CID ANNEX LAGOS,Touring Allowance - Force CID Lagos,0102,100000",
+                "FORCE CID ANNEX LAGOS,Stationery - Force CID Lagos,0301(a),50000",
+                "FORCE CID ANNEX LAGOS,Detainees Feeding - Force CID Lagos,0311(b),400000",
+              ].join("\n");
+              const a = document.createElement("a");
+              a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+              a.download = "zone-breakdown-sample.csv";
+              a.click();
+            }}
+          >
+            Download sample CSV
+          </button>
           <span className="text-[11px] text-muted-foreground">
-            Columns: Formation Name, Item of Expenditure, Code, Amount. To set the S/No header use Item = "S/No"; for the PROVISION row use Item = "PROVISION". Column index (0-based) optional via a "Column" column; defaults to the last column.
+            Columns: Formation Name, Item of Expenditure, Code, Amount. Use Item = "PROVISION" to set the provision; Item = "S/No" to set the S/No column header.
           </span>
         </div>
         {unmatched.length > 0 && (

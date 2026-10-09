@@ -584,7 +584,32 @@ export function AieBalancesSummary({
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-xs">Import from file (optional)</Label>
+              <div className="flex items-center justify-between">
+                <Label className="text-xs">Import from file (optional)</Label>
+                <button
+                  type="button"
+                  className="text-[11px] text-primary underline"
+                  onClick={() => {
+                    const csv = [
+                      "Code,Amount",
+                      "0102,500000",
+                      "0201,250000",
+                      "0301(a),100000",
+                      "0301(g),360000",
+                      "0401,80000",
+                      "0601,200000",
+                      "0801,150000",
+                      "0803(a),100000",
+                    ].join("\n");
+                    const a = document.createElement("a");
+                    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+                    a.download = "aie-amounts-sample.csv";
+                    a.click();
+                  }}
+                >
+                  Download sample CSV
+                </button>
+              </div>
               <p className="text-[11px] text-muted-foreground">
                 Your file needs two columns — the first is the <strong>budget code</strong> (e.g. <code>0301(a)</code>), and the second is the <strong>amount in Naira</strong> (numbers only, no commas or ₦ symbol). Rows whose code is not in the table will be skipped.
               </p>

@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import {
-  Check, ChevronDown, ChevronRight, Pencil, Plus, RefreshCcw, Send, Trash2, Undo2, History, Database, Loader2,
+  Check, ChevronDown, ChevronRight, Pencil, Plus, RefreshCcw, Send, Trash2, Undo2, History, Loader2,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { BudgetCode } from "@/components/BudgetCode";
@@ -27,7 +27,6 @@ import {
   listDistributionPeriods,
   returnDistributionPeriod,
   reviewDistributionPeriod,
-  seedAllDistributions,
   submitDistributionPeriod,
   updateDistributionPeriod,
   type DistributionAuditEntry,
@@ -49,6 +48,28 @@ const VIEWS: { key: DistributionView; label: string }[] = [
 const fmtN = (n: number | null | undefined) =>
   new Intl.NumberFormat("en-NG", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(n) || 0);
 
+// When the API returns columns: ["January", "February"] but items only carry one
+// combined amount per row, this collapses the empty column names into the preceding
+// non-empty column (e.g. "January" + empty "February" → "Jan-Feb").
+function mergeDisplayCols(
+  columns: string[],
+  items: { amounts?: Array<number | null> }[],
+): Array<{ label: string; ci: number }> {
+  if (columns.length === 0) return [];
+  const result: Array<{ label: string; ci: number }> = [];
+  for (let ci = 0; ci < columns.length; ci++) {
+    const hasData = items.some(it => it.amounts?.[ci] != null);
+    if (hasData || result.length === 0) {
+      result.push({ label: columns[ci], ci });
+    } else {
+      const prev = result[result.length - 1];
+      const prevShort = prev.label.length > 4 ? prev.label.slice(0, 3) : prev.label;
+      prev.label = `${prevShort}-${columns[ci].slice(0, 3)}`;
+    }
+  }
+  return result;
+}
+
 function apiErrorMessage(e: unknown, fallback: string) {
   if (e instanceof ApiError) return e.message || fallback;
   if (e instanceof Error) return e.message;
@@ -69,7 +90,6 @@ export default function DistributionsPage() {
             Bi-monthly distribution periods across Zone, Formations, Schools, and Summary tabs — synced with the PAB Digital System.
           </p>
         </div>
-        <SeedAllButton />
       </div>
 
       <Tabs value={view} onValueChange={(v) => setView(v as DistributionView)}>
@@ -85,33 +105,6 @@ export default function DistributionsPage() {
         ))}
       </Tabs>
     </div>
-  );
-}
-
-// ─── Seed-all admin action ────────────────────────────────────────────────────
-function SeedAllButton() {
-  const { hasRole } = useAuth();
-  const isAdmin = hasRole("SYSADMIN") || hasRole("BUDGET_DIR");
-  const [busy, setBusy] = useState(false);
-  if (!isAdmin) return null;
-  const run = async () => {
-    if (!confirm("Seed reference data and starter periods? Existing seeded rows will be reset.")) return;
-    setBusy(true);
-    try {
-      await seedAllDistributions();
-      toast.success("Reference data seeded.");
-      window.dispatchEvent(new CustomEvent("distributions:refresh"));
-    } catch (e) {
-      toast.error(apiErrorMessage(e, "Failed to seed data."));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Button size="sm" variant="outline" onClick={run} disabled={busy}>
-      {busy ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Database className="h-4 w-4 mr-1" />}
-      Seed reference data
-    </Button>
   );
 }
 
@@ -403,38 +396,44 @@ function ZoneViewTable({ period }: { period: DistributionZonePeriod }) {
                           </CollapsibleTrigger>
                           <CollapsibleContent>
                             <div className="overflow-x-auto">
-                              <table className="w-full text-[12px] border-separate border-spacing-0">
-                                <thead>
-                                  <tr className="text-left bg-muted/20">
-                                    <th className="px-3 py-1.5 w-16">S/No.</th>
-                                    <th className="px-3 py-1.5 min-w-[260px]">Item of Expenditure</th>
-                                    <th className="px-3 py-1.5 w-28">Code</th>
-                                    {period.columns.map((c, ci) => (
-                                      <th key={ci} className="px-3 py-1.5 w-36 text-right">{c}</th>
-                                    ))}
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {f.items.map((it, i) => (
-                                    <tr key={i} className="border-t border-border">
-                                      <td className="px-3 py-1.5 w-16">{it.sno ?? ""}</td>
-                                      <td className="px-3 py-1.5 min-w-[260px]">{it.desc}</td>
-                                      <td className="px-3 py-1.5 w-28"><BudgetCode code={it.code} /></td>
-                                      {period.columns.map((_, ci) => (
-                                        <td key={ci} className="px-3 py-1.5 text-right tabular-nums">
-                                          {it.amounts?.[ci] == null ? "" : fmtN(it.amounts[ci])}
-                                        </td>
+                              {(() => {
+                                const displayCols = mergeDisplayCols(period.columns, f.items);
+                                return (
+                                  <table className="w-full text-[12px] border-separate border-spacing-0">
+                                    <thead>
+                                      <tr className="text-left bg-muted/20">
+                                        <th className="px-3 py-1.5 w-16">S/No.</th>
+                                        <th className="px-3 py-1.5 min-w-[260px]">Item of Expenditure</th>
+                                        <th className="px-3 py-1.5 w-28">Code</th>
+                                        {displayCols.map(({ label, ci }) => (
+                                          <th key={ci} className="px-3 py-1.5 w-36 text-right">{label}</th>
+                                        ))}
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {f.items.map((it, i) => (
+                                        <tr key={i} className="border-t border-border">
+                                          <td className="px-3 py-1.5 w-16">{it.sno ?? ""}</td>
+                                          <td className="px-3 py-1.5 min-w-[260px]">{it.desc}</td>
+                                          <td className="px-3 py-1.5 w-28"><BudgetCode code={it.code} /></td>
+                                          {displayCols.map(({ ci }) => (
+                                            <td key={ci} className="px-3 py-1.5 text-right tabular-nums">
+                                              {it.amounts?.[ci] == null ? "" : fmtN(it.amounts[ci])}
+                                            </td>
+                                          ))}
+                                        </tr>
                                       ))}
-                                    </tr>
-                                  ))}
-                                  <tr className="border-t border-border bg-muted/30 font-semibold">
-                                    <td className="px-3 py-1.5" colSpan={3}>Total</td>
-                                    {(f.totals ?? []).map((t, ci) => (
-                                      <td key={ci} className="px-3 py-1.5 text-right tabular-nums">{fmtN(t)}</td>
-                                    ))}
-                                  </tr>
-                                </tbody>
-                              </table>
+                                      <tr className="border-t border-border bg-muted/30 font-semibold">
+                                        <td className="px-3 py-1.5" colSpan={3}>Total</td>
+                                        {displayCols.map(({ ci }) => (
+                                          <td key={ci} className="px-3 py-1.5 text-right tabular-nums">{fmtN((f.totals ?? [])[ci])}</td>
+                                        ))}
+                                      </tr>
+                                    </tbody>
+                                  </table>
+                                );
+                              })()}
+
                             </div>
                           </CollapsibleContent>
                         </div>
@@ -462,6 +461,7 @@ function SimpleViewTable({ period }: { period: DistributionSimplePeriod }) {
       )}
       {(period.sections ?? []).map((s, si) => {
         const sOpen = openSections[si] ?? true;
+        const displayCols = mergeDisplayCols(period.columns, s.items);
         const colTotals = period.columns.map((_, ci) => s.items.reduce((sum, it) => sum + (Number(it.amounts?.[ci]) || 0), 0));
         return (
           <Collapsible key={`${s.name}-${si}`} open={sOpen} onOpenChange={o => setOpenSections(prev => ({ ...prev, [si]: o }))}>
@@ -473,11 +473,15 @@ function SimpleViewTable({ period }: { period: DistributionSimplePeriod }) {
                     <div className="text-[13px] font-semibold uppercase tracking-wide">{s.name}</div>
                     <div className="text-[11px] text-muted-foreground mt-0.5">
                       PROVISION =N=
-                      {(s.provisions ?? []).map((p, ci) => (
-                        <span key={ci} className="ml-2 tabular-nums font-semibold text-foreground">
-                          {fmtN(p)}{period.columns.length > 1 ? ` (${period.columns[ci]})` : ""}
-                        </span>
-                      ))}
+                      {displayCols.map(({ label, ci }) => {
+                        const p = (s.provisions ?? [])[ci];
+                        if (p == null) return null;
+                        return (
+                          <span key={ci} className="ml-2 tabular-nums font-semibold text-foreground">
+                            {fmtN(p)}{displayCols.length > 1 ? ` (${label})` : ""}
+                          </span>
+                        );
+                      })}
                     </div>
                   </div>
                 </button>
@@ -490,8 +494,8 @@ function SimpleViewTable({ period }: { period: DistributionSimplePeriod }) {
                         <th className="px-3 py-1.5 w-16">S/No.</th>
                         <th className="px-3 py-1.5 min-w-[260px]">Items of Expenditure</th>
                         <th className="px-3 py-1.5 w-28">Code</th>
-                        {period.columns.map((c, ci) => (
-                          <th key={ci} className="px-3 py-1.5 w-36 text-right">{c}</th>
+                        {displayCols.map(({ label, ci }) => (
+                          <th key={ci} className="px-3 py-1.5 w-36 text-right">{label}</th>
                         ))}
                       </tr>
                     </thead>
@@ -501,7 +505,7 @@ function SimpleViewTable({ period }: { period: DistributionSimplePeriod }) {
                           <td className="px-3 py-1.5 w-16">{it.sno ?? ""}</td>
                           <td className="px-3 py-1.5 min-w-[260px]">{it.desc}</td>
                           <td className="px-3 py-1.5 w-28"><BudgetCode code={it.code} /></td>
-                          {period.columns.map((_, ci) => (
+                          {displayCols.map(({ ci }) => (
                             <td key={ci} className="px-3 py-1.5 text-right tabular-nums">
                               {it.amounts?.[ci] == null ? "" : fmtN(it.amounts[ci])}
                             </td>
@@ -510,8 +514,8 @@ function SimpleViewTable({ period }: { period: DistributionSimplePeriod }) {
                       ))}
                       <tr className="border-t border-border bg-muted/30 font-semibold">
                         <td className="px-3 py-1.5" colSpan={3}>Total</td>
-                        {colTotals.map((t, ci) => (
-                          <td key={ci} className="px-3 py-1.5 text-right tabular-nums">{fmtN(t)}</td>
+                        {displayCols.map(({ ci }) => (
+                          <td key={ci} className="px-3 py-1.5 text-right tabular-nums">{fmtN(colTotals[ci])}</td>
                         ))}
                       </tr>
                     </tbody>

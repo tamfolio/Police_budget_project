@@ -357,13 +357,36 @@ function AddPeriodSummaryDialog({
             <Input value={label} onChange={e => setLabel(e.target.value)} placeholder="e.g. May–June 2026" className="h-9 mt-1" />
           </div>
         </div>
-        <div className="flex items-center gap-2 mt-1">
+        <div className="flex items-center gap-2 mt-1 flex-wrap">
           <label className="inline-flex items-center gap-2 text-[12px] cursor-pointer">
             <span className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1">
               <Upload className="h-3.5 w-3.5" /> Upload CSV/XLSX
             </span>
             <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(f); }} />
           </label>
+          <button
+            type="button"
+            className="text-[11px] text-primary underline"
+            onClick={() => {
+              const csv = [
+                "Commands/Formations,Allocation (₦),From Distribution (₦)",
+                "FORCE HQ ANNEX LAGOS (c/o O/C PAY FHQ ANNEX),15287000,15287000",
+                "FORCE CID ANNEX LAGOS,4800000,4800000",
+                "CP WORKS FHQ ANNEX LAGOS,5099662.05,5099662.05",
+                "FORCE TRANSPORT OFFICER  FHQ ABUJA,87400000,87400000",
+                "CP PAP WESTERN PORTS COMMAND,835000,835000",
+                "CP PAP EASTERN PORTS COMMAND,460000,460000",
+                "CP RAILWAY COMMAND,385000,385000",
+                "AIG AIRWING LAGOS,280000,280000",
+              ].join("\n");
+              const a = document.createElement("a");
+              a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+              a.download = "distribution-summary-sample.csv";
+              a.click();
+            }}
+          >
+            Download sample CSV
+          </button>
           <span className="text-[11px] text-muted-foreground">
             Columns: Commands/Formations, Allocation, From Distribution. Names must match the formations already listed below.
           </span>
