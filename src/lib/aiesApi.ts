@@ -162,19 +162,19 @@ export async function deleteAie(id: string) {
 }
 
 export async function submitAie(id: string) {
-  return apiFetch<Aie>(`/aies/${id}/submit`, { method: "POST" });
+  return apiFetch<Aie>(`/aies/${id}/submit`, { method: "PATCH" });
 }
 
 export async function reviewAie(id: string) {
-  return apiFetch<Aie>(`/aies/${id}/review`, { method: "POST" });
+  return apiFetch<Aie>(`/aies/${id}/review`, { method: "PATCH" });
 }
 
 export async function approveAie(id: string) {
-  return apiFetch<Aie>(`/aies/${id}/approve`, { method: "POST" });
+  return apiFetch<Aie>(`/aies/${id}/approve`, { method: "PATCH" });
 }
 
 export async function rejectAie(id: string, reason: string) {
-  return apiFetch<Aie>(`/aies/${id}/reject`, { method: "POST", body: { reason } });
+  return apiFetch<Aie>(`/aies/${id}/reject`, { method: "PATCH", body: { reason } });
 }
 
 export async function reopenAie(id: string) {

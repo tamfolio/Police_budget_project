@@ -63,7 +63,7 @@ const App = () => (
                 <Route element={<ProtectedRoute requireRoles={["SYSADMIN"]} />}>
                   <Route path="/admin/users" element={<AdminUsersPage />} />
                   <Route path="/admin/roles" element={<AdminRolesPage />} />
-                  <Route path="/admin/permissions" element={<AdminPermissionsPage />} />
+                  <Route path="/roles/permissions" element={<AdminPermissionsPage />} />
                   <Route path="/admin/invite" element={<InviteUsersPage />} />
                   <Route path="/admin/backup" element={<BackupPage />} />
                 </Route>

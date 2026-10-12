@@ -586,6 +586,20 @@ function SummaryViewTable({ period }: { period: DistributionSummaryPeriod }) {
   );
 }
 
+// Converts "2026-03" → "March-April 2026", "2026-12" → "November-December 2026".
+// Snaps to the 6 fixed bi-monthly pairs (odd-start): Jan-Feb, Mar-Apr, May-Jun, Jul-Aug, Sep-Oct, Nov-Dec.
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+function biMonthLabel(id: string): string {
+  const m = id.match(/^(\d{4})-(\d{2})$/);
+  if (!m) return id || "Period";
+  const year = m[1];
+  const month = parseInt(m[2], 10);
+  if (month < 1 || month > 12) return id;
+  // Snap to the odd-start of the pair: 1,2→1  3,4→3  5,6→5 … 11,12→11
+  const start = month % 2 === 1 ? month : month - 1;
+  return `${MONTHS[start - 1]}-${MONTHS[start]} ${year}`;
+}
+
 // ─── Period editor dialog (structured form) ───────────────────────────────────
 function PeriodEditorDialog({
   open, onClose, mode, view, initial, onSave,
@@ -598,38 +612,34 @@ function PeriodEditorDialog({
   onSave: (p: DistributionPayload) => void | Promise<void>;
 }) {
   const [id, setId] = useState(initial.id);
-  const [label, setLabel] = useState(initial.label);
   const [payload, setPayload] = useState<DistributionPayload>(() => JSON.parse(JSON.stringify(initial)));
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     setId(initial.id);
-    setLabel(initial.label);
     const clone: DistributionPayload = JSON.parse(JSON.stringify(initial));
     if (view !== "summary") {
       const p = clone as DistributionZonePeriod | DistributionSimplePeriod;
-      const cols = p.columns ?? [];
-      p.columns = [cols[0] ?? "", cols[1] ?? ""];
+      p.columns = [biMonthLabel(initial.id)];
     }
     setPayload(clone);
   }, [initial, view]);
 
-  const submit = async () => {
-    if (!id.trim() || !label.trim()) { toast.error("Period id and label are required."); return; }
+  // Keep the single column label in sync with the Period ID as the user types.
+  const handleIdChange = (val: string) => {
+    setId(val);
     if (view !== "summary") {
-      const cols = (payload as DistributionZonePeriod | DistributionSimplePeriod).columns ?? [];
-      if (cols.length !== 2 || !cols[0].trim() || !cols[1].trim()) {
-        toast.error("Distributions are bi-monthly — exactly 2 non-empty column headers are required.");
-        return;
-      }
+      setPayload(p => ({ ...p, columns: [biMonthLabel(val)] } as DistributionPayload));
     }
-    const final = { ...payload, id: id.trim(), label: label.trim() } as DistributionPayload;
+  };
+
+  const submit = async () => {
+    if (!id.trim()) { toast.error("Period ID is required."); return; }
+    const colLabel = biMonthLabel(id.trim());
+    const final = { ...payload, id: id.trim(), label: colLabel, columns: [colLabel] } as DistributionPayload;
     setBusy(true);
     try { await onSave(final); } finally { setBusy(false); }
   };
-
-  const setColumns = (cols: string[]) =>
-    setPayload(p => ({ ...p, columns: cols } as DistributionPayload));
 
   const updateZoneAmount = (group: keyof DistributionZoneGroups, fIdx: number, iIdx: number, colIdx: number, val: number) =>
     setPayload(prev => {
@@ -671,8 +681,6 @@ function PeriodEditorDialog({
       return p;
     });
 
-  const columns = (payload as DistributionZonePeriod | DistributionSimplePeriod).columns ?? [];
-
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
@@ -680,42 +688,10 @@ function PeriodEditorDialog({
           <DialogTitle>{mode === "create" ? "Add" : "Edit"} {view} period</DialogTitle>
         </DialogHeader>
 
-        <div className="grid grid-cols-2 gap-3 shrink-0">
-          <div>
-            <Label className="text-[11px]">Period ID</Label>
-            <Input value={id} onChange={e => setId(e.target.value)} placeholder="e.g. 2026-01" className="h-9 mt-1" disabled={mode === "edit"} />
-          </div>
-          <div>
-            <Label className="text-[11px]">Period label</Label>
-            <Input value={label} onChange={e => setLabel(e.target.value)} placeholder="e.g. Jan–Feb 2026" className="h-9 mt-1" />
-          </div>
+        <div className="shrink-0">
+          <Label className="text-[11px]">Period ID</Label>
+          <Input value={id} onChange={e => handleIdChange(e.target.value)} placeholder="e.g. Jan-Feb 2026" className="h-9 mt-1 max-w-xs" disabled={mode === "edit"} />
         </div>
-
-        {view !== "summary" && (
-          <div className="shrink-0">
-            <div className="flex items-center gap-2 mb-1">
-              <Label className="text-[11px]">Column headers</Label>
-              <span className="text-[10px] text-muted-foreground">(bi-monthly — 2 months required)</span>
-            </div>
-            <div className="flex gap-2">
-              {[0, 1].map(ci => (
-                <div key={ci} className="flex flex-col gap-1">
-                  <span className="text-[10px] text-muted-foreground">Month {ci + 1}</span>
-                  <Input
-                    value={columns[ci] ?? ""}
-                    onChange={e => {
-                      const cols: string[] = [columns[0] ?? "", columns[1] ?? ""];
-                      cols[ci] = e.target.value;
-                      setColumns(cols);
-                    }}
-                    placeholder={ci === 0 ? "e.g. January" : "e.g. February"}
-                    className="h-8 text-[12px] w-44"
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         <div className="flex-1 overflow-y-auto mt-1 pr-1 space-y-1">
           {view === "zone" && (

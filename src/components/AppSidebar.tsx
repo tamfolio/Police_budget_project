@@ -28,7 +28,7 @@ const navItems = [
   { title: "Budget Codes", url: "/reference/budget-codes", icon: BookOpen },
   { title: "Admin", url: "/admin/users", icon: Users },
   { title: "Roles", url: "/admin/roles", icon: Shield },
-  { title: "Permissions", url: "/admin/permissions", icon: KeyRound },
+  { title: "Permissions", url: "/roles/permissions", icon: KeyRound },
   { title: "Invite Users", url: "/admin/invite", icon: UserPlus },
 ];
 

@@ -21,6 +21,7 @@ import { ApiError } from "@/lib/apiClient";
 import {
   approveBudgetProposal, createBudgetProposal, deleteBudgetProposal,
   listBudgetProposals, rejectBudgetProposal, reviewBudgetProposal,
+  resolveSubItemCode,
   submitBudgetProposal, updateBudgetProposal,
   PROPOSAL_STATUSES,
   type BudgetProposal, type BudgetProposalStatus,
@@ -173,12 +174,15 @@ function ProposalsListTab() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return rows;
-    return rows.filter(r =>
-      (deptMap[r.departmentId] ?? r.departmentId).toLowerCase().includes(q) ||
-      (subMap[r.subItemId]?.name ?? r.subItemId).toLowerCase().includes(q) ||
-      r.subItemId.toLowerCase().includes(q) ||
-      (r.description ?? "").toLowerCase().includes(q),
-    );
+    return rows.filter(r => {
+      const subCode = resolveSubItemCode(r) ?? "";
+      return (
+        (deptMap[r.departmentId] ?? r.departmentId ?? "").toLowerCase().includes(q) ||
+        (subMap[subCode]?.name ?? subCode).toLowerCase().includes(q) ||
+        subCode.toLowerCase().includes(q) ||
+        (r.description ?? r.justification ?? "").toLowerCase().includes(q)
+      );
+    });
   }, [rows, search, deptMap, subMap]);
 
   const openCreate = () => { setFormMode("create"); setFormInitial(null); setFormOpen(true); };
@@ -297,14 +301,15 @@ function ProposalsListTab() {
               ) : filtered.length === 0 ? (
                 <tr><td colSpan={8} className="px-3 py-8 text-center text-muted-foreground">No proposals match the filters.</td></tr>
               ) : filtered.map(r => {
-                const deptName = deptMap[r.departmentId] ?? r.departmentId.slice(0, 8) + "…";
-                const sub = subMap[r.subItemId];
-                const subLabel = sub ? `${sub.code} — ${sub.name}` : r.subItemId.slice(0, 12) + "…";
+                const deptName = deptMap[r.departmentId] ?? (r.departmentId?.slice(0, 8) ?? "?") + "…";
+                const subCode = resolveSubItemCode(r);
+                const sub = subCode ? subMap[subCode] : undefined;
+                const subLabel = sub ? `${sub.code} — ${sub.name}` : (subCode?.slice(0, 12) ?? "—") + "…";
                 return (
                   <tr key={r.id} className="border-t border-border/60 hover:bg-muted/20">
                     <td className="px-3 py-2">{deptName}</td>
                     <td className="px-3 py-2 max-w-[180px]">
-                      <span className="font-mono text-[11px]">{sub?.code ?? r.subItemId.slice(0, 8)}</span>
+                      <span className="font-mono text-[11px]">{sub?.code ?? subCode?.slice(0, 8) ?? "—"}</span>
                       {sub && <span className="text-muted-foreground ml-1 text-[11px]">— {sub.name}</span>}
                     </td>
                     <td className="px-3 py-2">{r.fiscalYear}</td>
@@ -549,13 +554,14 @@ function MyQueueTab() {
               ) : rows.length === 0 ? (
                 <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">Nothing in your queue.</td></tr>
               ) : rows.map(r => {
-                const deptName = deptMap[r.departmentId] ?? r.departmentId.slice(0, 8) + "…";
-                const sub = subMap[r.subItemId];
+                const deptName = deptMap[r.departmentId] ?? (r.departmentId?.slice(0, 8) ?? "?") + "…";
+                const subCode = resolveSubItemCode(r);
+                const sub = subCode ? subMap[subCode] : undefined;
                 return (
                   <tr key={r.id} className="border-t border-border/60 hover:bg-muted/20">
                     <td className="px-3 py-2">{deptName}</td>
                     <td className="px-3 py-2">
-                      <span className="font-mono text-[11px]">{sub?.code ?? r.subItemId.slice(0, 8)}</span>
+                      <span className="font-mono text-[11px]">{sub?.code ?? subCode?.slice(0, 8) ?? "—"}</span>
                       {sub && <span className="text-muted-foreground ml-1 text-[11px]">— {sub.name}</span>}
                     </td>
                     <td className="px-3 py-2">{r.fiscalYear}</td>

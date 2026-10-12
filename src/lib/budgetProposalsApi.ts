@@ -18,19 +18,58 @@ export const PROPOSAL_STATUSES: BudgetProposalStatus[] = [
   "REJECTED",
 ];
 
+export interface BudgetProposalTargetLineItem {
+  id: string;
+  aieId: string;
+  itemCodeId: string;
+  subItemCodeId: string;
+  subItemLabel: string;
+  budgetAmount: number;
+  actualAmountId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface BudgetProposal {
   id: string;
   fiscalYear: number;
   departmentId: string;
-  subItemId: string;
+  department?: { id: string; name: string } | null;
+  /** Present in older API responses; use resolveSubItemCode() to read. */
+  subItemId?: string | null;
+  /** Present in newer API responses instead of subItemId. */
+  lineItemId?: string | null;
+  targetLineItem?: BudgetProposalTargetLineItem | null;
   amount: number;
   status: BudgetProposalStatus;
+  justification?: string | null;
   description?: string | null;
   notes?: string | null;
-  supportingDocuments?: string[] | null;
+  reviewComment?: string | null;
+  rejectionReason?: string | null;
+  supportingDocumentKey?: string | null;
+  supportingDocumentUrl?: string | null;
   createdById: string;
+  reviewedById?: string | null;
+  approvedById?: string | null;
+  submittedAt?: string | null;
+  reviewedAt?: string | null;
+  approvedAt?: string | null;
   createdAt: string;
   updatedAt?: string;
+}
+
+/** Returns the sub-item code regardless of which API shape the proposal came from. */
+export function resolveSubItemCode(p: BudgetProposal): string | undefined {
+  return p.subItemId ?? p.targetLineItem?.subItemCodeId ?? undefined;
+}
+
+/** Normalises a raw API proposal — uppercases status, etc. */
+function normalise(raw: BudgetProposal): BudgetProposal {
+  return {
+    ...raw,
+    status: (raw.status as string).toUpperCase() as BudgetProposalStatus,
+  };
 }
 
 export interface CreateBudgetProposalPayload {
@@ -79,7 +118,7 @@ export async function listBudgetProposals(params: ListBudgetProposalsParams = {}
   const data = await apiFetch<unknown>(
     `/budget-proposals${qs(params as Record<string, string | number | undefined>)}`,
   );
-  return asArray<BudgetProposal>(data);
+  return asArray<BudgetProposal>(data).map(normalise);
 }
 
 export async function getBudgetProposal(id: string) {
