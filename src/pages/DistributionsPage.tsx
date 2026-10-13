@@ -690,7 +690,7 @@ function PeriodEditorDialog({
 
         <div className="shrink-0">
           <Label className="text-[11px]">Period ID</Label>
-          <Input value={id} onChange={e => handleIdChange(e.target.value)} placeholder="e.g. Jan-Feb 2026" className="h-9 mt-1 max-w-xs" disabled={mode === "edit"} />
+          <Input value={id} onChange={e => handleIdChange(e.target.value)} placeholder="e.g. 2026-03" className="h-9 mt-1 max-w-xs" disabled={mode === "edit"} />
         </div>
 
         <div className="flex-1 overflow-y-auto mt-1 pr-1 space-y-1">
