@@ -73,7 +73,8 @@ function normalise(raw: BudgetProposal): BudgetProposal {
 }
 
 export interface ProposalLineItem {
-  subItemId: string;
+  lineItemId: string;
+  subItemId?: string;
   amount: number;
 }
 

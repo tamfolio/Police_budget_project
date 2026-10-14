@@ -15,7 +15,15 @@ import type {
   BudgetProposal, CreateBudgetProposalPayload, UpdateBudgetProposalPayload,
 } from "@/lib/budgetProposalsApi";
 import { listDepartments, type Department } from "@/lib/departmentsApi";
-import { getBudgetCodeReference, type BudgetSubItem } from "@/lib/budgetCodesApi";
+import { listAies } from "@/lib/aiesApi";
+
+interface FlatLineItem {
+  lineItemId: string;
+  subItemId: string;
+  label: string;
+  aieNo: string;
+  budgetAmount: number;
+}
 
 interface Props {
   open: boolean;
@@ -30,6 +38,7 @@ export default function ProposalFormDialog({ open, mode, initial, onSubmit, onCl
 
   const [fiscalYear, setFiscalYear] = useState<string>(String(currentYear));
   const [departmentId, setDepartmentId] = useState("");
+  const [lineItemId, setLineItemId] = useState("");
   const [subItemId, setSubItemId] = useState("");
   const [amount, setAmount] = useState<string>("");
   const [justification, setJustification] = useState("");
@@ -37,24 +46,46 @@ export default function ProposalFormDialog({ open, mode, initial, onSubmit, onCl
   const [saving, setSaving] = useState(false);
 
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [subItems, setSubItems] = useState<BudgetSubItem[]>([]);
-  const [refLoading, setRefLoading] = useState(false);
+  const [flatItems, setFlatItems] = useState<FlatLineItem[]>([]);
+  const [deptLoading, setDeptLoading] = useState(false);
+  const [aiesLoading, setAiesLoading] = useState(false);
 
-  // Fetch reference data once when the dialog opens
+  // Fetch departments once when dialog opens
   useEffect(() => {
     if (!open) return;
-    setRefLoading(true);
-    Promise.all([
-      listDepartments({ isActive: true }),
-      getBudgetCodeReference(),
-    ])
-      .then(([depts, ref]) => {
-        setDepartments(depts);
-        setSubItems(ref.categories.flatMap(c => (c.subItems ?? []).map(s => ({ ...s, category: { code: c.code, name: c.name, sort: c.sort } }))));
-      })
-      .catch(() => toast.error("Could not load reference data."))
-      .finally(() => setRefLoading(false));
+    setDeptLoading(true);
+    listDepartments({ isActive: true })
+      .then(setDepartments)
+      .catch(() => toast.error("Could not load departments."))
+      .finally(() => setDeptLoading(false));
   }, [open]);
+
+  // Fetch AIE line items whenever fiscal year changes
+  useEffect(() => {
+    if (!open) return;
+    const fy = Number(fiscalYear);
+    if (!fy || fy < 2000 || fy > 2100) return;
+    setAiesLoading(true);
+    listAies({ fiscalYear: fy })
+      .then(aies => {
+        const items: FlatLineItem[] = [];
+        for (const aie of aies) {
+          for (const item of (aie.lineItems ?? [])) {
+            if (!item.id) continue;
+            items.push({
+              lineItemId: item.id,
+              subItemId: item.subItemCodeId,
+              label: item.subItemLabel ?? item.subItemCodeId,
+              aieNo: aie.aieNo,
+              budgetAmount: item.budgetAmount,
+            });
+          }
+        }
+        setFlatItems(items);
+      })
+      .catch(() => toast.error("Could not load AIE line items."))
+      .finally(() => setAiesLoading(false));
+  }, [open, fiscalYear]);
 
   // Populate fields when editing
   useEffect(() => {
@@ -62,6 +93,7 @@ export default function ProposalFormDialog({ open, mode, initial, onSubmit, onCl
     if (initial) {
       setFiscalYear(String(initial.fiscalYear));
       setDepartmentId(initial.departmentId);
+      setLineItemId(initial.targetLineItem?.id ?? initial.lineItemId ?? "");
       setSubItemId(initial.targetLineItem?.subItemCodeId ?? initial.subItemId ?? "");
       setAmount(String(initial.amount));
       setJustification(initial.justification ?? initial.description ?? "");
@@ -69,12 +101,21 @@ export default function ProposalFormDialog({ open, mode, initial, onSubmit, onCl
     } else {
       setFiscalYear(String(currentYear));
       setDepartmentId("");
+      setLineItemId("");
       setSubItemId("");
       setAmount("");
       setJustification("");
       setNotes("");
     }
   }, [open, initial, currentYear]);
+
+  const handleLineItemChange = (val: string) => {
+    const item = flatItems.find(i => i.lineItemId === val);
+    if (item) {
+      setLineItemId(item.lineItemId);
+      setSubItemId(item.subItemId);
+    }
+  };
 
   const handleSubmit = async () => {
     const fy = Number(fiscalYear);
@@ -86,8 +127,8 @@ export default function ProposalFormDialog({ open, mode, initial, onSubmit, onCl
       toast.error("Please select a department.");
       return;
     }
-    if (!subItemId) {
-      toast.error("Please select a budget sub-item.");
+    if (!lineItemId) {
+      toast.error("Please select an AIE line item.");
       return;
     }
     const amt = Number(amount);
@@ -95,8 +136,8 @@ export default function ProposalFormDialog({ open, mode, initial, onSubmit, onCl
       toast.error("Amount must be a positive number.");
       return;
     }
-    if (!justification.trim()) {
-      toast.error("Justification is required.");
+    if (justification.trim().length < 10) {
+      toast.error("Justification must be at least 10 characters.");
       return;
     }
 
@@ -104,20 +145,28 @@ export default function ProposalFormDialog({ open, mode, initial, onSubmit, onCl
       fiscalYear: fy,
       departmentId,
       justification: justification.trim(),
-      items: [{ subItemId, amount: amt }],
+      items: [{ lineItemId, amount: amt }],
     };
     if (notes.trim()) payload.notes = notes.trim();
 
     setSaving(true);
     try {
       await onSubmit(payload);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const item = flatItems.find(i => i.lineItemId === lineItemId);
+      if (item && msg.includes(lineItemId)) {
+        throw new Error(msg.replace(lineItemId, `"${item.label}"`));
+      }
+      throw e;
     } finally {
       setSaving(false);
     }
   };
 
   const selectedDept = departments.find(d => d.id === departmentId);
-  const selectedSub = subItems.find(s => s.code === subItemId);
+  const selectedItem = flatItems.find(i => i.lineItemId === lineItemId);
+  const refLoading = deptLoading || aiesLoading;
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -131,78 +180,84 @@ export default function ProposalFormDialog({ open, mode, initial, onSubmit, onCl
           </DialogDescription>
         </DialogHeader>
 
-        {refLoading ? (
-          <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground text-[12px]">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading reference data…
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label className="text-[11px]">Fiscal year</Label>
+            <Input type="number" min={2000} max={2100} value={fiscalYear}
+              onChange={(e) => setFiscalYear(e.target.value)} className="h-8 text-[12px]" />
           </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-[11px]">Fiscal year</Label>
-              <Input type="number" min={2000} max={2100} value={fiscalYear}
-                onChange={(e) => setFiscalYear(e.target.value)} className="h-8 text-[12px]" />
-            </div>
-            <div>
-              <Label className="text-[11px]">Amount (NGN)</Label>
-              <Input type="number" min={0.01} step={0.01} value={amount}
-                onChange={(e) => setAmount(e.target.value)} className="h-8 text-[12px]"
-                placeholder="e.g. 500000" />
-            </div>
+          <div>
+            <Label className="text-[11px]">Amount (NGN)</Label>
+            <Input type="number" min={0.01} step={0.01} value={amount}
+              onChange={(e) => setAmount(e.target.value)} className="h-8 text-[12px]"
+              placeholder="e.g. 500000" />
+          </div>
 
-            <div className="col-span-2">
-              <Label className="text-[11px]">Department</Label>
-              <Select value={departmentId} onValueChange={setDepartmentId}>
+          <div className="col-span-2">
+            <Label className="text-[11px]">Department</Label>
+            <Select value={departmentId} onValueChange={setDepartmentId} disabled={deptLoading}>
+              <SelectTrigger className="h-9 text-[12px] mt-0.5">
+                <SelectValue placeholder={deptLoading ? "Loading…" : departments.length === 0 ? "No departments loaded" : "Select department…"}>
+                  {selectedDept?.name}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {departments.map(d => (
+                  <SelectItem key={d.id} value={d.id} className="text-[12px]">{d.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="col-span-2">
+            <Label className="text-[11px]">AIE line item</Label>
+            {aiesLoading ? (
+              <div className="flex items-center gap-1.5 mt-1.5 text-[12px] text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading line items…
+              </div>
+            ) : (
+              <Select value={lineItemId} onValueChange={handleLineItemChange}>
                 <SelectTrigger className="h-9 text-[12px] mt-0.5">
-                  <SelectValue placeholder={departments.length === 0 ? "No departments loaded" : "Select department…"}>
-                    {selectedDept?.name}
+                  <SelectValue placeholder={flatItems.length === 0 ? "No AIE line items for this fiscal year" : "Select line item…"}>
+                    {selectedItem
+                      ? `${selectedItem.aieNo} · ${selectedItem.label}`
+                      : lineItemId
+                        ? "Current selection"
+                        : undefined}
                   </SelectValue>
                 </SelectTrigger>
-                <SelectContent>
-                  {departments.map(d => (
-                    <SelectItem key={d.id} value={d.id} className="text-[12px]">{d.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="col-span-2">
-              <Label className="text-[11px]">Budget sub-item</Label>
-              <Select value={subItemId} onValueChange={setSubItemId}>
-                <SelectTrigger className="h-9 text-[12px] mt-0.5">
-                  <SelectValue placeholder={subItems.length === 0 ? "No sub-items loaded" : "Select sub-item…"}>
-                    {selectedSub ? `${selectedSub.code} — ${selectedSub.name}` : undefined}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent className="max-h-60">
-                  {subItems.map(s => (
-                    <SelectItem key={s.code} value={s.code} className="text-[12px]">
-                      <span className="font-mono">{s.code}</span>
-                      <span className="text-muted-foreground ml-1">— {s.name}</span>
+                <SelectContent className="max-h-72">
+                  {flatItems.map(item => (
+                    <SelectItem key={item.lineItemId} value={item.lineItemId} className="text-[12px]">
+                      <span className="font-mono text-muted-foreground text-[10px]">{item.aieNo}</span>
+                      <span className="ml-1.5">{item.label}</span>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-
-            <div className="col-span-2">
-              <Label className="text-[11px]">Description / justification</Label>
-              <Textarea value={justification} onChange={(e) => setJustification(e.target.value)}
-                maxLength={500} rows={3} className="text-[12px] mt-0.5"
-                placeholder="Explain what this budget proposal covers and why it is needed." />
-            </div>
-            <div className="col-span-2">
-              <Label className="text-[11px]">Notes <span className="text-muted-foreground">(optional)</span></Label>
-              <Textarea value={notes} onChange={(e) => setNotes(e.target.value)}
-                rows={2} className="text-[12px] mt-0.5"
-                placeholder="Any additional internal notes." />
-            </div>
+            )}
           </div>
-        )}
+
+          <div className="col-span-2">
+            <Label className="text-[11px]">Description / justification</Label>
+            <Textarea value={justification} onChange={(e) => setJustification(e.target.value)}
+              maxLength={500} rows={3} className="text-[12px] mt-0.5"
+              placeholder="Explain what this budget proposal covers and why it is needed." />
+          </div>
+          <div className="col-span-2">
+            <Label className="text-[11px]">Notes <span className="text-muted-foreground">(optional)</span></Label>
+            <Textarea value={notes} onChange={(e) => setNotes(e.target.value)}
+              rows={2} className="text-[12px] mt-0.5"
+              placeholder="Any additional internal notes." />
+          </div>
+        </div>
 
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
           <Button type="button" onClick={handleSubmit} disabled={saving || refLoading}>
-            {saving ? <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />Saving…</> : mode === "create" ? "Create draft" : "Save changes"}
+            {saving
+              ? <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />Saving…</>
+              : mode === "create" ? "Create draft" : "Save changes"}
           </Button>
         </DialogFooter>
       </DialogContent>
