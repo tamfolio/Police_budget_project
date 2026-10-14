@@ -62,13 +62,13 @@ export function RecentActivityFeed() {
       ) : (
         <ul className="divide-y divide-border max-h-[360px] overflow-auto">
           {entries.map(e => (
-            <li key={e.id} className="px-4 py-2 flex items-center gap-2 text-[11.5px]">
-              <span className={`font-mono uppercase text-[10px] tracking-wide w-14 shrink-0 ${ACTION_CLASS[e.action] ?? ""}`}>{e.action}</span>
-              <span className="flex-1 min-w-0 truncate">
-                <span className="font-medium">{actorName(e)}</span>
-                <span className="text-muted-foreground"> · {ENTITY_LABEL[e.entityType] ?? e.entityType}</span>
+            <li key={e.id} className="px-4 py-2 flex items-start gap-2 text-[11.5px]">
+              <span className={`font-mono uppercase text-[10px] tracking-wide w-24 shrink-0 truncate overflow-hidden mt-0.5 ${ACTION_CLASS[e.action] ?? ""}`}>{e.action}</span>
+              <span className="flex-1 min-w-0">
+                <span className="font-medium block truncate">{actorName(e)}</span>
+                <span className="text-muted-foreground text-[10px]">{ENTITY_LABEL[e.entityType] ?? e.entityType}</span>
               </span>
-              <span className="text-[10px] text-muted-foreground whitespace-nowrap">{new Date(e.createdAt).toLocaleString()}</span>
+              <span className="text-[10px] text-muted-foreground whitespace-nowrap mt-0.5">{new Date(e.createdAt).toLocaleString()}</span>
             </li>
           ))}
         </ul>

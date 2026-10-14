@@ -72,12 +72,16 @@ function normalise(raw: BudgetProposal): BudgetProposal {
   };
 }
 
+export interface ProposalLineItem {
+  subItemId: string;
+  amount: number;
+}
+
 export interface CreateBudgetProposalPayload {
   fiscalYear: number;
   departmentId: string;
-  subItemId: string;
-  amount: number;
-  description?: string;
+  justification: string;
+  items: ProposalLineItem[];
   notes?: string;
   supportingDocuments?: string[];
 }

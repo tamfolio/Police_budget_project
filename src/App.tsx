@@ -26,6 +26,7 @@ import AuditTrailPage from "@/pages/AuditTrailPage";
 import ProfileSettingsPage from "@/pages/ProfileSettingsPage";
 import ComparisonsPage from "@/pages/ComparisonsPage";
 import CapitalBudgetPage from "@/pages/CapitalBudgetPage";
+import AIEImportPage from "@/pages/AIEImportPage";
 import NotFound from "@/pages/NotFound";
 import LandingPage from "@/pages/LandingPage";
 import HelpVideosPage from "@/pages/help/HelpVideosPage";
@@ -53,6 +54,7 @@ const App = () => (
                 <Route path="/dashboard" element={<DashboardPage />} />
                 <Route path="/fund-inflows" element={<FundInflowsPage />} />
                 <Route path="/aie" element={<AIERecordsPage />} />
+                <Route path="/aie/import" element={<AIEImportPage />} />
                 <Route path="/distributions" element={<DistributionsPage />} />
                 <Route path="/expenditures" element={<ExpendituresPage />} />
                 <Route path="/capital-budget" element={<CapitalBudgetPage />} />

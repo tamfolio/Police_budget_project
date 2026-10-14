@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { createAie, getAie, updateAie, deleteAie, type CreateAieLineItem } from "@/lib/aiesApi";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowUpDown, Plus, Upload, AlertTriangle, Lock, Eraser, Check, X } from "lucide-react";
+import { ArrowUpDown, Plus, AlertTriangle, Lock, Eraser, Check, X } from "lucide-react";
 import { DIRECT_AIE_DISTRIBUTED_2026 } from "@/data/directAieDistributed2026";
 import { AIE_MONTHLY_ACTUALS_2026, getActualOverrides, isAuthoritativeActualMonth, monthlySpentKey as sharedMonthlySpentKey } from "@/data/aieMonthlyActuals2026";
 import { getAnnualAppropriation2026, getPercentAllocated2026, getCodeName2026, ALL_CODES_2026, ANNUAL_APPROPRIATION_2026 } from "@/data/aieAnnualAppropriation2026";
@@ -493,59 +493,19 @@ export function AieBalancesSummary({
     );
   }
 
-  // Add Month modal: choose a month for the current FY, optionally upload CSV (code,amount).
+  // Add Month modal: choose a month for the current FY, then enter amounts manually in the table.
   function AddMonthDialog() {
     const [monthIdx, setMonthIdx] = useState<number>(() => {
       for (let i = 0; i < 12; i++) if (!months.includes(i)) return i;
       return 0;
     });
-    const [csvFile, setCsvFile] = useState<File | null>(null);
-    const [csvRows, setCsvRows] = useState<{ code: string; amount: number; known: boolean }[] | null>(null);
     const [busy, setBusy] = useState(false);
     const duplicate = months.includes(monthIdx);
-    const knownCodes = new Set(rows.map(r => r.code));
-
-    const parseCsv = async (file: File) => {
-      const { parseUpload } = await import("@/lib/tableUpload");
-      const rows = await parseUpload(file);
-      const out: { code: string; amount: number; known: boolean }[] = [];
-      for (const parts of rows) {
-        if (!parts || parts.length < 2) continue;
-        const code = (parts[0] ?? "").trim();
-        if (/code/i.test(code) && /amount/i.test(parts[1] ?? "")) continue; // header
-        const amount = Number(String(parts[1] ?? "").replace(/[,\s₦]/g, ""));
-        if (!code || !Number.isFinite(amount)) continue;
-        out.push({ code, amount, known: knownCodes.has(code) });
-      }
-      setCsvRows(out);
-    };
 
     const persistExtra = (mi: number) => {
       const next = Array.from(new Set([...extraMonths, mi])).sort((a, b) => a - b);
       localStorage.setItem(extraMonthsKey(fy), JSON.stringify(next));
       setExtraMonths(next);
-    };
-
-    const confirm = async () => {
-      if (duplicate) { toast.error("That month is already a column. Pick another."); return; }
-      setBusy(true);
-      try {
-        persistExtra(monthIdx);
-        if (csvRows && csvRows.length) {
-          const valid = csvRows.filter(r => r.known);
-          for (const row of valid) {
-            const current = rows.find(r => r.code === row.code)?.months[monthIdx] || 0;
-            // eslint-disable-next-line no-await-in-loop
-            await saveMonth(row.code, monthIdx, row.amount, current);
-          }
-          toast.success(`Imported ${valid.length} amounts for ${MONTH_FULL[monthIdx]} ${fy}`);
-        } else {
-          toast.success(`Added ${MONTH_FULL[monthIdx]} ${fy} column`);
-        }
-        setAddOpen(false);
-      } finally {
-        setBusy(false);
-      }
     };
 
     const enterManually = () => {
@@ -562,7 +522,7 @@ export function AieBalancesSummary({
           <DialogHeader>
             <DialogTitle>Add Month · {fy}</DialogTitle>
             <DialogDescription>
-              Choose a month to add as a new column. You can type amounts directly in the table, or upload a file to import them all at once.
+              Choose a month to add as a new column, then type amounts directly in the table.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -582,82 +542,17 @@ export function AieBalancesSummary({
                 </p>
               )}
             </div>
-
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs">Import from file (optional)</Label>
-                <button
-                  type="button"
-                  className="text-[11px] text-primary underline"
-                  onClick={() => {
-                    const csv = [
-                      "Code,Amount",
-                      "0102,500000",
-                      "0201,250000",
-                      "0301(a),100000",
-                      "0301(g),360000",
-                      "0401,80000",
-                      "0601,200000",
-                      "0801,150000",
-                      "0803(a),100000",
-                    ].join("\n");
-                    const a = document.createElement("a");
-                    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-                    a.download = "aie-amounts-sample.csv";
-                    a.click();
-                  }}
-                >
-                  Download sample CSV
-                </button>
-              </div>
-              <p className="text-[11px] text-muted-foreground">
-                Your file needs two columns — the first is the <strong>budget code</strong> (e.g. <code>0301(a)</code>), and the second is the <strong>amount in Naira</strong> (numbers only, no commas or ₦ symbol). Rows whose code is not in the table will be skipped.
-              </p>
-              <input
-                type="file"
-                accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                className="text-xs"
-                onChange={(e) => {
-                  const f = e.target.files?.[0] ?? null;
-                  setCsvFile(f); setCsvRows(null);
-                  if (f) parseCsv(f);
-                }}
-              />
-              {csvRows && (
-                <div className="mt-2 rounded border border-border max-h-48 overflow-auto text-[11px]">
-                  <table className="w-full">
-                    <thead className="bg-muted/40">
-                      <tr><th className="p-1 text-left">Code</th><th className="p-1 text-right">Amount (₦)</th><th className="p-1">Status</th></tr>
-                    </thead>
-                    <tbody>
-                       {csvRows.map((r, i) => (
-                        <tr key={i} className={r.known ? "" : "bg-destructive/10"}>
-                           <td className="p-1"><BudgetCode code={r.code} /></td>
-                          <td className="p-1 text-right font-mono">{fmtMoney(r.amount)}</td>
-                          <td className="p-1 text-center text-[10.5px]">{r.known ? "✓ Ready" : "Not in table — will be skipped"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <div className="p-1.5 text-[10.5px] text-muted-foreground">
-                    {csvRows.filter(r => r.known).length} row{csvRows.filter(r => r.known).length === 1 ? "" : "s"} ready to import
-                    {csvRows.filter(r => !r.known).length > 0 && ` · ${csvRows.filter(r => !r.known).length} unrecognised (will be skipped)`}
-                  </div>
-                </div>
-              )}
-            </div>
+            <p className="text-[11px] text-muted-foreground rounded-md border border-border/60 bg-muted/20 px-3 py-2">
+              To import amounts in bulk, use the{" "}
+              <a href="/aie/import" className="text-primary underline underline-offset-2">AIE Import</a>{" "}
+              page. Bulk imports go through director review before data is committed.
+            </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddOpen(false)} disabled={busy}>Cancel</Button>
-            {csvFile ? (
-              <Button onClick={confirm} disabled={busy || duplicate}>
-                <Upload className="h-3 w-3 mr-1" />Add & Import
-              </Button>
-            ) : (
-              <Button onClick={enterManually} disabled={busy || duplicate}>
-                <Plus className="h-3 w-3 mr-1" />Enter Manually
-              </Button>
-            )}
+            <Button onClick={enterManually} disabled={busy || duplicate}>
+              <Plus className="h-3 w-3 mr-1" />Add Month
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

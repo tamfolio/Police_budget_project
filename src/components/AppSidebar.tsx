@@ -1,23 +1,32 @@
 import {
   LayoutDashboard, Banknote, FileSignature, Layers, Receipt,
   ClipboardList, BarChart3, ShieldCheck, Users, LogOut, BookOpen, UserPlus,
-  GitCompare,
+  GitCompare, FileUp, ChevronRight,
   Building2, Shield, KeyRound,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
-import { useLocation } from "react-router-dom";
+import { useLocation, Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import npfLogo from "@/assets/npf-logo.png";
 import { ROLE_LABEL } from "@/lib/roles";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent,
-  SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar,
+  SidebarMenu, SidebarMenuButton, SidebarMenuItem,
+  SidebarMenuSub, SidebarMenuSubButton, SidebarMenuSubItem,
+  useSidebar,
 } from "@/components/ui/sidebar";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 const navItems = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Fund Inflows", url: "/fund-inflows", icon: Banknote },
-  { title: "AIE Records", url: "/aie", icon: FileSignature },
+  {
+    title: "AIE Records", url: "/aie", icon: FileSignature,
+    children: [
+      { title: "AIE Records", url: "/aie" },
+      { title: "AIE Import", url: "/aie/import" },
+    ],
+  },
   { title: "Distributions", url: "/distributions", icon: Layers },
   { title: "Expenditures", url: "/expenditures", icon: Receipt },
   { title: "Capital Budget", url: "/capital-budget", icon: Building2 },
@@ -58,21 +67,59 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild isActive={isActive(item.url)}>
-                    <NavLink
-                      to={item.url}
-                      end={item.url === '/'}
-                      className="text-sidebar-foreground hover:bg-sidebar-accent/50 rounded-md transition-colors"
-                      activeClassName="bg-accent/12 text-accent border-l-[3px] border-accent font-medium"
-                    >
-                      <item.icon className="mr-2.5 h-4 w-4 shrink-0" />
-                      {!collapsed && <span className="text-[13px] font-sans">{item.title}</span>}
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {navItems.map((item) => {
+                if (item.children) {
+                  const groupActive = isActive(item.url);
+                  return (
+                    <Collapsible key={item.title} defaultOpen={groupActive} className="group/collapsible">
+                      <SidebarMenuItem>
+                        <CollapsibleTrigger asChild>
+                          <SidebarMenuButton
+                            isActive={groupActive}
+                            className="text-sidebar-foreground hover:bg-sidebar-accent/50 rounded-md transition-colors w-full"
+                          >
+                            <item.icon className="mr-2.5 h-4 w-4 shrink-0" />
+                            {!collapsed && (
+                              <>
+                                <span className="text-[13px] font-sans flex-1">{item.title}</span>
+                                <ChevronRight className="h-3.5 w-3.5 transition-transform group-data-[state=open]/collapsible:rotate-90" />
+                              </>
+                            )}
+                          </SidebarMenuButton>
+                        </CollapsibleTrigger>
+                        {!collapsed && (
+                          <CollapsibleContent>
+                            <SidebarMenuSub>
+                              {item.children.map(child => (
+                                <SidebarMenuSubItem key={child.url}>
+                                  <SidebarMenuSubButton asChild isActive={location.pathname === child.url}>
+                                    <Link to={child.url} className="text-[12px]">{child.title}</Link>
+                                  </SidebarMenuSubButton>
+                                </SidebarMenuSubItem>
+                              ))}
+                            </SidebarMenuSub>
+                          </CollapsibleContent>
+                        )}
+                      </SidebarMenuItem>
+                    </Collapsible>
+                  );
+                }
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild isActive={isActive(item.url)}>
+                      <NavLink
+                        to={item.url}
+                        end={item.url === '/'}
+                        className="text-sidebar-foreground hover:bg-sidebar-accent/50 rounded-md transition-colors"
+                        activeClassName="bg-accent/12 text-accent border-l-[3px] border-accent font-medium"
+                      >
+                        <item.icon className="mr-2.5 h-4 w-4 shrink-0" />
+                        {!collapsed && <span className="text-[13px] font-sans">{item.title}</span>}
+                      </NavLink>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

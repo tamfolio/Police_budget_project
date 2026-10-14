@@ -15,9 +15,14 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import {
-  Check, Loader2, Pencil, Plus, RefreshCcw, Send, Trash2, X, FileText, XCircle,
+  Check, Loader2, Pencil, Plus, RefreshCcw, Send, Trash2, FileText, XCircle,
+  BookOpen,
 } from "lucide-react";
 import { ApiError } from "@/lib/apiClient";
+import {
+  listWorkbookReconciliations, approveWorkbookReconciliation, rejectWorkbookReconciliation,
+  type AieImportSummary,
+} from "@/lib/aieImportsApi";
 import {
   approveBudgetProposal, createBudgetProposal, deleteBudgetProposal,
   listBudgetProposals, rejectBudgetProposal, reviewBudgetProposal,
@@ -92,7 +97,9 @@ function useRefData() {
 // ─────────────────────────────────────────────────────────────────────────────
 export default function ProposalsPage() {
   useEffect(() => { document.title = "Budget Proposals – NPF BMS"; }, []);
-  const [tab, setTab] = useState<"all" | "queue">("all");
+  const { hasRole } = useAuth();
+  const showReconciliations = hasRole("BUDGET_DIR") || hasRole("SYSADMIN");
+  const [tab, setTab] = useState<"all" | "queue" | "reconciliations">("all");
 
   return (
     <div className="space-y-4 max-w-6xl">
@@ -114,13 +121,21 @@ export default function ProposalsPage() {
         <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-500 inline-block" />Step 3 — <b className="text-foreground">Sr. Budget Director</b> approves</span>
       </div>
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v as "all" | "queue")}>
-        <TabsList className="grid grid-cols-2 w-full max-w-sm">
+      <Tabs value={tab} onValueChange={(v) => setTab(v as "all" | "queue" | "reconciliations")}>
+        <TabsList className={`grid w-full ${showReconciliations ? "grid-cols-3 max-w-lg" : "grid-cols-2 max-w-sm"}`}>
           <TabsTrigger value="all">All Proposals</TabsTrigger>
           <TabsTrigger value="queue">My Queue</TabsTrigger>
+          {showReconciliations && (
+            <TabsTrigger value="reconciliations" className="flex items-center gap-1.5">
+              <BookOpen className="h-3.5 w-3.5" />Workbook Reconciliations
+            </TabsTrigger>
+          )}
         </TabsList>
         <TabsContent value="all" className="mt-4"><ProposalsListTab /></TabsContent>
         <TabsContent value="queue" className="mt-4"><MyQueueTab /></TabsContent>
+        {showReconciliations && (
+          <TabsContent value="reconciliations" className="mt-4"><WorkbookReconciliationsTab /></TabsContent>
+        )}
       </Tabs>
     </div>
   );
@@ -638,6 +653,200 @@ function MyQueueTab() {
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => { setRejectRow(null); setRejectReason(""); }} disabled={rejecting}>Cancel</Button>
             <Button type="button" variant="destructive" onClick={handleReject} disabled={rejecting}>
+              {rejecting ? <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />Rejecting…</> : "Reject"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Workbook Reconciliations — directors approve/reject uploaded AIE workbooks
+// ─────────────────────────────────────────────────────────────────────────────
+const IMPORT_STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
+  pending: "secondary",
+  approved: "default",
+  rejected: "destructive",
+};
+
+function WorkbookReconciliationsTab() {
+  const [rows, setRows] = useState<AieImportSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const [rejectTarget, setRejectTarget] = useState<AieImportSummary | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [rejecting, setRejecting] = useState(false);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      setRows(await listWorkbookReconciliations());
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "Failed to load workbook reconciliations."));
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const doApprove = async (r: AieImportSummary) => {
+    try {
+      await approveWorkbookReconciliation(r.importId);
+      toast.success("Workbook approved and committed.");
+      await refresh();
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "Approval failed."));
+    }
+  };
+
+  const doReject = async () => {
+    if (!rejectTarget) return;
+    if (rejectReason.trim().length < 5) { toast.error("Reason must be at least 5 characters."); return; }
+    setRejecting(true);
+    try {
+      await rejectWorkbookReconciliation(rejectTarget.importId, rejectReason.trim());
+      toast.success("Workbook rejected.");
+      setRejectTarget(null);
+      setRejectReason("");
+      await refresh();
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "Rejection failed."));
+    } finally {
+      setRejecting(false);
+    }
+  };
+
+  const fmtDt = (iso?: string) => {
+    try { return iso ? new Date(iso).toLocaleDateString() : "—"; } catch { return iso ?? "—"; }
+  };
+
+  return (
+    <Card>
+      <CardContent className="p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-[12px] text-muted-foreground">
+            Uploaded workbooks awaiting director review before data is committed.
+          </p>
+          <Button size="sm" variant="ghost" type="button" onClick={refresh} disabled={loading}>
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCcw className="h-3.5 w-3.5" />}
+          </Button>
+        </div>
+
+        <div className="rounded border border-border overflow-x-auto">
+          <table className="w-full text-[12px]">
+            <thead className="bg-muted/50 text-[11px] uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th className="text-left px-3 py-2">File</th>
+                <th className="text-left px-3 py-2">FY</th>
+                <th className="text-left px-3 py-2">Action</th>
+                <th className="text-right px-3 py-2">Budgets</th>
+                <th className="text-right px-3 py-2">Actuals</th>
+                <th className="text-left px-3 py-2">Uploaded by</th>
+                <th className="text-left px-3 py-2">Date</th>
+                <th className="text-left px-3 py-2">Status</th>
+                <th className="px-3 py-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={9} className="px-3 py-8 text-center text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin inline mr-2" />Loading…
+                  </td>
+                </tr>
+              ) : rows.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="px-3 py-8 text-center text-muted-foreground">
+                    No workbook submissions yet.
+                  </td>
+                </tr>
+              ) : rows.map(r => (
+                <tr key={r.importId} className="border-t border-border/60 hover:bg-muted/20">
+                  <td className="px-3 py-2 max-w-[200px]">
+                    <span className="truncate block font-mono text-[11px]">{r.fileName}</span>
+                  </td>
+                  <td className="px-3 py-2">{r.fiscalYear}</td>
+                  <td className="px-3 py-2 capitalize">{r.action}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{r.rowCounts?.budgets ?? "—"}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{r.rowCounts?.actuals ?? "—"}</td>
+                  <td className="px-3 py-2 text-muted-foreground max-w-[140px]">
+                    <span className="truncate block">
+                      {r.submittedBy?.fullName ?? r.submittedBy?.email ?? "—"}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">{fmtDt(r.createdAt)}</td>
+                  <td className="px-3 py-2">
+                    <Badge
+                      variant={IMPORT_STATUS_VARIANT[r.status] ?? "outline"}
+                      className="text-[10px] capitalize"
+                    >
+                      {r.status}
+                    </Badge>
+                  </td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap">
+                    {r.status === "pending" && (
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          size="sm"
+                          className="h-7 px-2 text-[11px] text-emerald-700 border-emerald-300 hover:bg-emerald-50"
+                          variant="outline"
+                          type="button"
+                          onClick={() => doApprove(r)}
+                        >
+                          <Check className="h-3 w-3 mr-1" />Approve
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-[11px] text-destructive border-destructive/40 hover:bg-destructive/10"
+                          type="button"
+                          onClick={() => { setRejectTarget(r); setRejectReason(""); }}
+                        >
+                          <XCircle className="h-3 w-3 mr-1" />Reject
+                        </Button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+
+      <Dialog open={!!rejectTarget} onOpenChange={(o) => { if (!o) { setRejectTarget(null); setRejectReason(""); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reject workbook</DialogTitle>
+            <DialogDescription className="text-[12px]">
+              Explain why this workbook is being rejected. The uploader will be notified.
+            </DialogDescription>
+          </DialogHeader>
+          <div>
+            <Label className="text-[11px]">Reason <span className="text-muted-foreground">(min 5 characters)</span></Label>
+            <Textarea
+              rows={4}
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              maxLength={1000}
+              className="text-[12px] mt-0.5"
+              placeholder="e.g. incorrect fiscal year, missing actuals data…"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => { setRejectTarget(null); setRejectReason(""); }}
+              disabled={rejecting}
+            >
+              Cancel
+            </Button>
+            <Button type="button" variant="destructive" onClick={doReject} disabled={rejecting}>
               {rejecting ? <><Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />Rejecting…</> : "Reject"}
             </Button>
           </DialogFooter>
