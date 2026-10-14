@@ -32,7 +32,7 @@ export default function ProposalFormDialog({ open, mode, initial, onSubmit, onCl
   const [departmentId, setDepartmentId] = useState("");
   const [subItemId, setSubItemId] = useState("");
   const [amount, setAmount] = useState<string>("");
-  const [description, setDescription] = useState("");
+  const [justification, setJustification] = useState("");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -62,16 +62,16 @@ export default function ProposalFormDialog({ open, mode, initial, onSubmit, onCl
     if (initial) {
       setFiscalYear(String(initial.fiscalYear));
       setDepartmentId(initial.departmentId);
-      setSubItemId(initial.subItemId);
+      setSubItemId(initial.targetLineItem?.subItemCodeId ?? initial.subItemId ?? "");
       setAmount(String(initial.amount));
-      setDescription(initial.description ?? "");
+      setJustification(initial.justification ?? initial.description ?? "");
       setNotes(initial.notes ?? "");
     } else {
       setFiscalYear(String(currentYear));
       setDepartmentId("");
       setSubItemId("");
       setAmount("");
-      setDescription("");
+      setJustification("");
       setNotes("");
     }
   }, [open, initial, currentYear]);
@@ -95,14 +95,17 @@ export default function ProposalFormDialog({ open, mode, initial, onSubmit, onCl
       toast.error("Amount must be a positive number.");
       return;
     }
+    if (!justification.trim()) {
+      toast.error("Justification is required.");
+      return;
+    }
 
     const payload: CreateBudgetProposalPayload = {
       fiscalYear: fy,
       departmentId,
-      subItemId,
-      amount: amt,
+      justification: justification.trim(),
+      items: [{ subItemId, amount: amt }],
     };
-    if (description.trim()) payload.description = description.trim();
     if (notes.trim()) payload.notes = notes.trim();
 
     setSaving(true);
@@ -183,7 +186,7 @@ export default function ProposalFormDialog({ open, mode, initial, onSubmit, onCl
 
             <div className="col-span-2">
               <Label className="text-[11px]">Description / justification</Label>
-              <Textarea value={description} onChange={(e) => setDescription(e.target.value)}
+              <Textarea value={justification} onChange={(e) => setJustification(e.target.value)}
                 maxLength={500} rows={3} className="text-[12px] mt-0.5"
                 placeholder="Explain what this budget proposal covers and why it is needed." />
             </div>
